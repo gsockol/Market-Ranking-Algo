@@ -1,0 +1,21 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+*.pyo
+src/__pycache__/
+
+# Generated outputs (re-created on each run)
+output/hvlp_market_ranking.html
+output/hvlp_market_ranking.xlsx
+
+# API cache (machine-local, regenerated automatically)
+cache/*.json
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# OS files
+.DS_Store
+Thumbs.db
