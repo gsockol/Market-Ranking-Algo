@@ -147,12 +147,17 @@ def main():
         logger.info("Step 3/10: API fetch skipped (--skip-api). All API variables = None.")
         external_data = {c: {} for c in countries}
     else:
-        logger.info("Step 3/10: Fetching World Bank data (cache TTL: %dh) …", cfg.CACHE_EXPIRY_HOURS)
+        logger.info(
+            "Step 3/10: Fetching external data (WB / OECD / Trading Economics, "
+            "cache TTL: %dh) …", cfg.CACHE_EXPIRY_HOURS
+        )
         from src.fetcher import fetch_all_external_data
         external_data = fetch_all_external_data(
             countries=countries,
             country_iso3_map=cfg.COUNTRY_ISO3_MAP,
             wb_indicators=cfg.WB_INDICATORS,
+            oecd_country_codes=cfg.OECD_COUNTRY_CODES,
+            te_api_key=cfg.TRADING_ECONOMICS_API_KEY,
             cache_dir=cfg.CACHE_DIR,
             ttl_hours=cfg.CACHE_EXPIRY_HOURS,
             no_cache=args.no_cache,

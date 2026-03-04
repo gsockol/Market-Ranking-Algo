@@ -207,6 +207,44 @@ WB_INDICATORS = {
 }
 
 # -----------------------------------------------------------------------------
+# TRADING ECONOMICS API KEY
+# Leave blank ("") to use YAML fallback for corporate_tax_rate.
+# Sign up at https://tradingeconomics.com/api/ for a free or paid key.
+# -----------------------------------------------------------------------------
+TRADING_ECONOMICS_API_KEY = ""
+
+# -----------------------------------------------------------------------------
+# OECD COUNTRY CODES FOR stats.oecd.org API
+# Most align with ISO-3. Set to None for non-OECD members (AHR / HOUSECOST
+# data won't exist → YAML fallback applies automatically).
+# -----------------------------------------------------------------------------
+OECD_COUNTRY_CODES = {
+    # OECD members
+    "Austria":      "AUT",
+    "Belgium":      "BEL",
+    "France":       "FRA",
+    "Germany":      "DEU",
+    "Netherlands":  "NLD",
+    "Portugal":     "PRT",
+    "Switzerland":  "CHE",
+    "Turkiye":      "TUR",
+    "Turkey":       "TUR",
+    "UK":           "GBR",
+    "Italy":        "ITA",
+    "Poland":       "POL",
+    "Japan":        "JPN",
+    "South Korea":  "KOR",
+    "Chile":        "CHL",
+    "Colombia":     "COL",
+    # Non-OECD members — OECD API returns no data → YAML fallback:
+    "Brazil":       None,
+    "India":        None,
+    "Indonesia":    None,
+    "Thailand":     None,
+    "Philippines":  None,
+}
+
+# -----------------------------------------------------------------------------
 # IMF DATAMAPPER CODES
 # -----------------------------------------------------------------------------
 IMF_INDICATORS = {
@@ -243,12 +281,12 @@ IMF_COUNTRY_CODES = {
 # -----------------------------------------------------------------------------
 DATA_QUALITY_FLAGS = {
     "IC.BUS.EASE.XQ":   "⚠ Discontinued — World Bank halted Doing Business in 2021; last data 2019/2020",
-    "numbeo":           "⚠ Limited quality — Numbeo is crowd-sourced; use directionally only",
-    "SI.DST.04TH.20":   "⚠ Proxy — 3rd+4th income quintile share used as middle-class approximation",
+    "SI.DST.04TH.20":   "⚠ Proxy — 3rd+4th income quintile income share used as middle-class approximation",
     "youth_estimate":   "⚠ Estimate — computed from 15–64 band when specific age bands unavailable",
-    "labor_hardcoded":  "⚠ Hardcoded — OECD/ILO 2023 data; update manually for new countries",
-    "tax_hardcoded":    "⚠ Hardcoded — OECD 2024 statutory rates; update manually for new countries",
-    "re_hardcoded":     "⚠ Hardcoded — Numbeo 2024 property index; update manually for new countries",
+    "oecd_ahr":         "⚠ OECD AHR — indexed vs highest country in set; non-OECD members use YAML fallback",
+    "oecd_housecost":   "⚠ OECD RHPI — Real House Price Index; non-OECD members use YAML fallback",
+    "te_tax":           "⚠ Trading Economics — requires API key; falls back to YAML when key absent",
+    "yaml_fallback":    "⚠ YAML — static estimate used; no live API data available for this country/variable",
 }
 
 # -----------------------------------------------------------------------------
