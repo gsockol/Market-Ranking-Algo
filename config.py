@@ -252,6 +252,45 @@ DATA_QUALITY_FLAGS = {
 }
 
 # -----------------------------------------------------------------------------
+# CSV COLUMN MAP
+# Maps raw CSV column headers → internal snake_case variable keys.
+# Whitespace is stripped from CSV headers before matching.
+# Add entries here when adding new input columns to the CSV.
+# -----------------------------------------------------------------------------
+CSV_COLUMN_MAP = {
+    # Underscore-style headers (current committed CSV format)
+    "Country":                    "country",
+    "Market_Size_USD_M":          "market_size_m",
+    "Current_Penetration":        "current_penetration_pct",
+    "Future_Penetration":         "future_penetration_pct",
+    "Population_M":               "population_m",
+    "Concentration_000s_per_Gym": "concentration",
+    "GDP_per_Capita_USD":         "gdp_per_capita",
+    "Gym_Membership_CAGR":        "gym_membership_cagr",
+    # MSD-spec aliases — so the spec example CSV also works without modification
+    "Market Size ($M)":           "market_size_m",
+    "Current Penetration %":      "current_penetration_pct",
+    "Future Penetration %":       "future_penetration_pct",
+    "Population (M)":             "population_m",
+    "Concentration (000s/gym)":   "concentration",
+    "GDP per Capita ($)":         "gdp_per_capita",
+    "Gym Membership CAGR":        "gym_membership_cagr",
+}
+
+# -----------------------------------------------------------------------------
+# EUROZONE COUNTRIES (ISO3)
+# Used to attribute EUR/USD volatility to Eurozone members when fetching
+# the exchange rate series (they share the EUR, so PA.NUS.FCRF returns
+# EUR/USD for all of them — volatility will be identical across the group,
+# which is the correct economic interpretation).
+# -----------------------------------------------------------------------------
+EUROZONE_ISO3 = {
+    "AUT", "BEL", "FRA", "DEU", "NLD", "PRT", "ITA",
+    "ESP", "FIN", "GRC", "IRL", "LVA", "LTU", "LUX",
+    "MLT", "SVK", "SVN", "CYP", "EST",
+}
+
+# -----------------------------------------------------------------------------
 # CACHE SETTINGS
 # -----------------------------------------------------------------------------
 CACHE_DIR = ".cache"

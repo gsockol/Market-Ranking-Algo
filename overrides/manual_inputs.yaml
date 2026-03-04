@@ -1,0 +1,143 @@
+# =============================================================================
+# HVLP MARKET SCORING — MANUAL DATA OVERRIDES
+# =============================================================================
+# Purpose: Supply data for variables that cannot be retrieved automatically,
+#          or to correct/supersede API-sourced values.
+#
+# Structure:
+#   overrides:
+#     <Country Name (must match CSV exactly)>:
+#       <variable_key>: <numeric value>
+#
+# Variable keys must match those in config.py WEIGHTS exactly.
+#
+# Seeded values below (2023/2024 data) — update as needed.
+# Sources:
+#   corporate_tax_rate   : OECD Tax Database 2024 (statutory CIT rate, %)
+#   labor_cost_index     : Index vs US=100; derived from OECD/ILO average hourly
+#                          labour compensation in manufacturing (USD), 2023
+#   real_estate_cost_index: USD/sqm city-centre prime retail, Numbeo 2024
+#   middle_class_pct     : % population earning $10–$100/day PPP
+#                          (Pew Research / World Bank PovcalNet estimates, 2022)
+# =============================================================================
+
+overrides:
+  Austria:
+    corporate_tax_rate: 23.0
+    labor_cost_index: 84.0
+    real_estate_cost_index: 11800.0
+    middle_class_pct: 68.0
+
+  Belgium:
+    corporate_tax_rate: 25.0
+    labor_cost_index: 91.0
+    real_estate_cost_index: 5400.0
+    middle_class_pct: 64.0
+
+  France:
+    corporate_tax_rate: 25.0
+    labor_cost_index: 77.0
+    real_estate_cost_index: 13500.0
+    middle_class_pct: 57.0
+
+  Germany:
+    corporate_tax_rate: 29.9
+    labor_cost_index: 87.0
+    real_estate_cost_index: 8200.0
+    middle_class_pct: 64.0
+
+  Netherlands:
+    corporate_tax_rate: 25.8
+    labor_cost_index: 82.0
+    real_estate_cost_index: 9100.0
+    middle_class_pct: 70.0
+
+  Portugal:
+    corporate_tax_rate: 21.0
+    labor_cost_index: 37.0
+    real_estate_cost_index: 5500.0
+    middle_class_pct: 52.0
+
+  Switzerland:
+    corporate_tax_rate: 14.9
+    labor_cost_index: 111.0
+    real_estate_cost_index: 16200.0
+    middle_class_pct: 72.0
+
+  Turkiye:
+    corporate_tax_rate: 25.0
+    labor_cost_index: 24.0
+    real_estate_cost_index: 2100.0
+    middle_class_pct: 42.0
+
+  UK:
+    corporate_tax_rate: 25.0
+    labor_cost_index: 65.0
+    real_estate_cost_index: 14800.0
+    middle_class_pct: 60.0
+
+  Italy:
+    corporate_tax_rate: 27.9
+    labor_cost_index: 69.0
+    real_estate_cost_index: 7800.0
+    middle_class_pct: 55.0
+
+  Poland:
+    corporate_tax_rate: 19.0
+    labor_cost_index: 27.0
+    real_estate_cost_index: 4100.0
+    middle_class_pct: 55.0
+
+  Brazil:
+    corporate_tax_rate: 34.0
+    labor_cost_index: 22.0
+    real_estate_cost_index: 2500.0
+    middle_class_pct: 35.0
+
+  Chile:
+    corporate_tax_rate: 27.0
+    labor_cost_index: 20.0
+    real_estate_cost_index: 3500.0
+    middle_class_pct: 45.0
+
+  Colombia:
+    corporate_tax_rate: 35.0
+    labor_cost_index: 15.0
+    real_estate_cost_index: 1800.0
+    middle_class_pct: 30.0
+
+  India:
+    corporate_tax_rate: 25.2
+    labor_cost_index: 8.0
+    real_estate_cost_index: 5900.0
+    middle_class_pct: 12.0
+
+  South Korea:
+    corporate_tax_rate: 24.0
+    labor_cost_index: 58.0
+    real_estate_cost_index: 10200.0
+    middle_class_pct: 58.0
+
+  Indonesia:
+    corporate_tax_rate: 22.0
+    labor_cost_index: 10.0
+    real_estate_cost_index: 2000.0
+    middle_class_pct: 20.0
+
+  Thailand:
+    corporate_tax_rate: 20.0
+    labor_cost_index: 12.0
+    real_estate_cost_index: 3600.0
+    middle_class_pct: 30.0
+
+  Philippines:
+    corporate_tax_rate: 25.0
+    labor_cost_index: 9.0
+    real_estate_cost_index: 3000.0
+    middle_class_pct: 15.0
+
+  Japan:
+    corporate_tax_rate: 29.7
+    labor_cost_index: 72.0
+    real_estate_cost_index: 12100.0
+    middle_class_pct: 70.0

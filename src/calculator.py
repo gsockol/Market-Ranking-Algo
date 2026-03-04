@@ -1,0 +1,154 @@
+"""
+src/calculator.py
+=================
+Derives all computed metrics from the raw CSV columns.
+
+All formulas come verbatim from the MSD.  No values are hardcoded in this
+module — dues increase rates are read from the caller-supplied dict.
+
+Derived columns added to the DataFrame
+---------------------------------------
+penetration_headroom      : future_penetration_pct − current_penetration_pct
+implied_members_current   : current_penetration_pct × population_m × 1 000 000
+current_dues_monthly_usd  : market_size_m × 1e6 / (implied_members × 12)
+dues_increase_pct         : per-country override or default 0.0
+future_dues_monthly_usd   : current_dues × (1 + dues_increase_pct)
+implied_members_future    : future_penetration_pct × population_m × 1 000 000
+potential_market_size     : implied_members_future × future_dues × 12 / 1e6  ($M)
+opportunity_usd_m         : potential_market_size − market_size_m             ($M)
+avg_gym_spend_pct_gdp     : (current_dues × 12) / gdp_per_capita × 100       (%)
+"""
+
+import logging
+import numpy as np
+import pandas as pd
+
+logger = logging.getLogger(__name__)
+
+
+def _safe_divide(numerator, denominator):
+    """Return numerator / denominator; return NaN when denominator is zero or NaN."""
+    with np.errstate(divide="ignore", invalid="ignore"):
+        result = np.where(
+            (pd.isna(denominator)) | (denominator == 0),
+            np.nan,
+            numerator / denominator,
+        )
+    return result
+
+
+def calculate_derived_metrics(df: pd.DataFrame, dues_increase_pct: dict) -> pd.DataFrame:
+    """
+    Add all derived columns to *df* in-place and return it.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Output of ingestor.ingest_csv — must contain the raw CSV keys.
+    dues_increase_pct : dict
+        From config.DUES_INCREASE_PCT.
+        Keys are country names; "default" key holds the fallback rate.
+
+    Returns
+    -------
+    pd.DataFrame
+        Original DataFrame with derived columns appended.
+    """
+    default_dues_inc = dues_increase_pct.get("default", 0.0)
+
+    rows = []
+    for _, row in df.iterrows():
+        country = row["country"]
+        mkt_size  = row.get("market_size_m")
+        cur_pen   = row.get("current_penetration_pct")
+        fut_pen   = row.get("future_penetration_pct")
+        pop       = row.get("population_m")
+        gdp_pc    = row.get("gdp_per_capita")
+
+        derived = {}
+
+        # --- Penetration Headroom -------------------------------------------
+        if pd.notna(fut_pen) and pd.notna(cur_pen):
+            derived["penetration_headroom"] = round(fut_pen - cur_pen, 6)
+        else:
+            derived["penetration_headroom"] = np.nan
+            logger.warning("%s: missing penetration values → penetration_headroom = NaN", country)
+
+        # --- Implied current membership base (absolute count) ---------------
+        if pd.notna(cur_pen) and pd.notna(pop):
+            implied_current = cur_pen * pop * 1_000_000
+        else:
+            implied_current = np.nan
+
+        derived["implied_members_current"] = implied_current
+
+        # --- Current monthly dues per member (USD) --------------------------
+        if pd.notna(mkt_size) and pd.notna(implied_current) and implied_current > 0:
+            cur_dues = (mkt_size * 1_000_000) / (implied_current * 12)
+        elif pd.notna(mkt_size) and implied_current == 0:
+            logger.warning(
+                "%s: current penetration × population = 0 → cannot derive monthly dues. "
+                "Set manually in overrides/manual_inputs.yaml if needed.",
+                country,
+            )
+            cur_dues = np.nan
+        else:
+            cur_dues = np.nan
+
+        derived["current_dues_monthly_usd"] = cur_dues
+
+        # --- Per-country dues increase rate ---------------------------------
+        inc_pct = dues_increase_pct.get(country, default_dues_inc)
+        derived["dues_increase_pct"] = inc_pct
+
+        # --- Future monthly dues per member (USD) ---------------------------
+        if pd.notna(cur_dues):
+            fut_dues = cur_dues * (1 + inc_pct)
+        else:
+            fut_dues = np.nan
+
+        derived["future_dues_monthly_usd"] = fut_dues
+
+        # --- Implied future membership base ---------------------------------
+        if pd.notna(fut_pen) and pd.notna(pop):
+            implied_future = fut_pen * pop * 1_000_000
+        else:
+            implied_future = np.nan
+
+        derived["implied_members_future"] = implied_future
+
+        # --- Potential Market Size ($M) -------------------------------------
+        if pd.notna(implied_future) and pd.notna(fut_dues):
+            pot_mkt = (implied_future * fut_dues * 12) / 1_000_000
+        else:
+            pot_mkt = np.nan
+            logger.warning("%s: cannot compute potential_market_size → NaN", country)
+
+        derived["potential_market_size"] = pot_mkt
+
+        # --- Opportunity ($M) -----------------------------------------------
+        if pd.notna(pot_mkt) and pd.notna(mkt_size):
+            derived["opportunity_usd_m"] = round(pot_mkt - mkt_size, 4)
+        else:
+            derived["opportunity_usd_m"] = np.nan
+
+        # --- Avg Gym Spend as % of GDP --------------------------------------
+        if pd.notna(cur_dues) and pd.notna(gdp_pc) and gdp_pc > 0:
+            derived["avg_gym_spend_pct_gdp"] = round(
+                (cur_dues * 12) / gdp_pc * 100, 6
+            )
+        else:
+            derived["avg_gym_spend_pct_gdp"] = np.nan
+
+        rows.append(derived)
+
+    derived_df = pd.DataFrame(rows, index=df.index)
+
+    # Merge derived columns back — don't overwrite existing columns unless
+    # explicitly computed here (opportunity and potential_market_size always
+    # come from this module).
+    for col in derived_df.columns:
+        df[col] = derived_df[col]
+
+    logger.info("Derived metrics computed for %d countries.", len(df))
+    return df
