@@ -92,9 +92,9 @@ def _fmt(val, decimals=2, suffix=""):
 
 
 def _score_bar(score: float, color: str, width_px: int = 120) -> str:
-    # Scale against 200 so USA (100) sits at 50%; scores > 100 extend further.
-    pct = max(0, min(200, score))
-    filled = round(pct / 200 * width_px)
+    # Scale against 100: percentile scores are 0–100, so 100 fills the bar.
+    pct = max(0, min(100, score))
+    filled = round(pct / 100 * width_px)
     return (
         f'<div class="score-bar-wrap" style="width:{width_px}px">'
         f'<div class="score-bar-fill" style="width:{filled}px;background:{color}"></div>'
@@ -109,7 +109,8 @@ def _cat_mini_bars(score_row: pd.Series, categories: dict) -> str:
         contrib = score_row.get(contrib_key, 0.0) or 0.0
         color = _CAT_COLORS.get(cat_key, "#6b7280")
         label = _CAT_LABELS.get(cat_key, cat_key)
-        bar_w = round(contrib / 60 * 60)   # 60pts = full bar width
+        # Scale to 60px; 40pts ≈ max category contribution (market_opportunity at p100)
+        bar_w = round(contrib / 40 * 60)
         bar_w = max(0, min(60, bar_w))
         parts.append(
             f'<div class="mini-bar-row" title="{label}: {contrib:.1f}pts">'
@@ -154,7 +155,8 @@ def _detail_panel(
             base_w = base_weights.get(var, 0.0)
             src = country_audit.get(var, "missing")
             badge_html, _ = _SOURCE_BADGES.get(src, ("", ""))
-            contrib = (norm_val * w * 100) if pd.notna(norm_val) else 0.0
+            # norm_val is a percentile score (0–100); contribution = percentile × weight
+            contrib = (norm_val * w) if pd.notna(norm_val) else 0.0
 
             # Weight adjustment indicator
             if abs(w - base_w) > 1e-6:
@@ -165,7 +167,7 @@ def _detail_panel(
                 w_str = f'{w*100:.1f}%'
 
             raw_str = _fmt(raw_val, 2) if pd.notna(raw_val) else "—"
-            norm_str = f"{norm_val:.3f}" if pd.notna(norm_val) else "—"
+            norm_str = f"{norm_val:.1f}" if pd.notna(norm_val) else "—"
             contrib_str = f"{contrib:.2f}pts" if pd.notna(norm_val) and w > 0 else "—"
 
             rows_html.append(
@@ -188,7 +190,7 @@ def _detail_panel(
             f'</div>'
             f'<table class="var-table"><thead><tr>'
             f'<th>Variable</th><th>Source</th><th>Raw Value</th>'
-            f'<th>USA-Norm (×100)</th><th>Weight</th><th>Contribution</th>'
+            f'<th>Percentile Score</th><th>Weight</th><th>Contribution</th>'
             f'</tr></thead><tbody>'
             + "".join(rows_html)
             + '</tbody></table></div>'
@@ -556,7 +558,7 @@ def generate_dashboard(
     Run date: {run_date} &nbsp;|&nbsp;
     Model: 17-variable weighted composite &nbsp;|&nbsp;
     Countries: {n_countries} &nbsp;|&nbsp;
-    Scoring model: USA benchmark = 100
+    Scoring model: Z-score + percentile hybrid (0–100 scale, relative ranking)
   </div>
 </div>
 
@@ -591,7 +593,7 @@ def generate_dashboard(
   <strong>Methodology</strong><br>
   17 variables across 5 categories: Market Opportunity (35%), Penetration Headroom (10%),
   Operational Risk (25%), Cost Structure (10%), Demand Indicators (15%).<br>
-  All variables normalised against USA benchmark (USA = 100). Scores > 100 indicate outperformance vs the USA; scores < 100 indicate underperformance.
+  All variables normalised using Z-score + percentile hybrid (0–100 scale). Each variable's score reflects its percentile rank across all countries in the set — extreme outliers no longer dominate contributions. Inverted variables are flipped so that 100 always means "best".
   Inverted variables: Inflation Rate, Currency Volatility, Corporate Tax Rate,
   Labour Cost Index, Real Estate Cost Index.<br>
   Conditional rules: Rule 1 (CAGR missing → Opportunity 25%, Potential 15%);
