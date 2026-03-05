@@ -5,48 +5,43 @@ USA-baseline normalisation for all scored variables.
 
 Normalisation model
 -------------------
-Each country's variable value is first expressed as a ratio relative to the USA
-reference value defined in config.USA_BASELINE:
+Replaced log normalization with Z-score + percentile hybrid to handle extreme
+outliers while preserving relative ranking and weighting.
 
-    Non-inverted (higher = better):
-        ratio = country_value / usa_value       → USA ratio = 1.0
+Each variable is normalised independently across all countries in three steps:
 
-    Inverted (lower = better):
-        ratio = usa_value / country_value       → USA ratio = 1.0
-        Rationale: a country with *lower* cost than the USA gets ratio > 1.0,
-        meaning it scores *better* than the USA.
+  Step 1 — Z-score
+      z = (x − mean(x)) / std(x)
+      Centres and scales the distribution so all variables are comparable.
 
-Logarithmic compression is then applied so that extreme outliers have
-diminishing marginal returns while keeping USA anchored at exactly 100:
+  Step 2 — Percentile conversion (0–100)
+      p = rankdata(z, method="average") / n_valid × 100
+      Maps each country's Z-score to its percentile rank within the set.
+      A score of 50 means the country is exactly at the median.
+      A score of 100 means the country has the best value for this variable.
 
-    log_score = 100 × log1p(ratio) / log1p(1.0)
-              = 100 × ln(1 + ratio) / ln(2)
+  Step 3 — Invert for "lower is better" variables
+      p = 100 − p
+      For variables where a lower raw value is better (inflation, currency
+      volatility, corporate tax, labor cost, real estate cost), the raw
+      percentile is flipped so that 100 still means "best".
 
-USA (ratio = 1.0) → 100 × ln(2) / ln(2) = 100.
-Countries better than USA (ratio > 1.0) → score > 100.
-Countries worse than USA (ratio < 1.0) → score < 100.
-
-Guard: log1p is undefined for ratio ≤ −1.  Ratios are clamped to −1 + ε
-before the log is applied.  In practice this only affects WGI variables for
-countries whose raw score is strongly negative while the USA reference is
-positive.
+USA_BASELINE is accepted for API compatibility and used by the audit trail
+downstream; it does not affect the normalised percentile scores.
 
 Edge cases
 ----------
-- Variable not in usa_baseline → stored as NaN (warning logged).
-- country_value is NaN → stored as NaN (already handled by weighter Rule 3).
-- Inverted + country_value == 0 → division by zero → stored as NaN.
-- usa_value == 0 → cannot normalize → stored as NaN (warning logged).
-- ratio ≤ −1 → clamped to −1 + 1e-9 before log1p (logged at DEBUG level).
+- Variable not in data or all NaN  → column set to NaN (warning logged).
+- std == 0 (all countries identical) → all get 50.0 (median by convention).
+- NaN values for individual countries → excluded from rankdata; stay NaN in
+  the output (handled by weighter Rule 3 — missing weight redistributed).
 """
 
 import logging
 
 import numpy as np
 import pandas as pd
-
-# Normalising divisor so that USA (ratio = 1.0) always maps to exactly 100.
-_LOG_SCALE = np.log1p(1.0)  # ln(2) ≈ 0.6931
+from scipy.stats import rankdata
 
 logger = logging.getLogger(__name__)
 
@@ -58,51 +53,33 @@ def normalize_all(
     usa_baseline: dict,
 ) -> pd.DataFrame:
     """
-    Normalize every variable in *variables* using USA-baseline ratios.
+    Normalise every variable in *variables* using Z-score + percentile hybrid.
 
     Parameters
     ----------
     df : pd.DataFrame
-        Full merged data, one row per country. Must contain all columns
-        listed in *variables* (missing columns produce NaN output).
+        Full merged data, one row per country.
     variables : list[str]
         Ordered list of internal variable keys to normalise.
     inverted_variables : set[str]
         Variable keys where lower raw = better score.
-        For these: norm = usa_value / country_value.
+        These receive  p = 100 − p  after percentile conversion.
     usa_baseline : dict
-        {variable_key: usa_reference_value} from config.USA_BASELINE.
+        {variable_key: usa_reference_value} — retained for API compatibility
+        and downstream auditing; not used in normalisation math.
 
     Returns
     -------
     pd.DataFrame
         Index matches *df*. Columns = *variables*.
-        Values are log-compressed scores: 100 × log1p(ratio) / log1p(1.0).
-        USA = 100.0 exactly.  Scores can exceed 100 or be negative.
-        The scorer sums these directly (no further ×100 multiplication).
+        Values are percentile scores in [~0, 100] (or NaN for missing data).
+        The scorer sums these directly — no further ×100 multiplication.
+        Higher = better for every variable (including inverted ones).
     """
     result = pd.DataFrame(index=df.index)
 
     for var in variables:
         if var.startswith("_"):
-            continue
-
-        usa_val = usa_baseline.get(var)
-
-        if usa_val is None:
-            logger.warning(
-                "Variable '%s' has no USA_BASELINE entry — normalised column will be NaN.",
-                var,
-            )
-            result[var] = np.nan
-            continue
-
-        if usa_val == 0:
-            logger.warning(
-                "Variable '%s' USA baseline is 0 — cannot normalize — column will be NaN.",
-                var,
-            )
-            result[var] = np.nan
             continue
 
         if var not in df.columns:
@@ -113,7 +90,8 @@ def normalize_all(
             continue
 
         raw = df[var].copy().astype(float)
-        n_valid = raw.notna().sum()
+        valid_mask = raw.notna()
+        n_valid = valid_mask.sum()
 
         if n_valid == 0:
             logger.warning(
@@ -122,28 +100,39 @@ def normalize_all(
             result[var] = np.nan
             continue
 
-        if var in inverted_variables:
-            # Lower raw value = better score.
-            # ratio = usa_value / country_value  →  USA ratio = 1.0
-            # Guard against division by zero (country_value == 0).
-            ratio = raw.copy()
-            valid_nonzero = raw.notna() & (raw != 0)
-            zero_mask = raw.notna() & (raw == 0)
-            ratio[valid_nonzero] = usa_val / raw[valid_nonzero]
-            ratio[zero_mask] = np.nan    # can't invert a zero value
-            ratio[raw.isna()] = np.nan
-        else:
-            # Higher raw value = better score.
-            # ratio = country_value / usa_value  →  USA ratio = 1.0
-            ratio = raw / usa_val
+        # ── Step 1: Z-score across all valid countries ────────────────────
+        raw_valid = raw[valid_mask]
+        mean_val = raw_valid.mean()
+        std_val = raw_valid.std(ddof=1)
 
-        # Log compression: score = 100 × log1p(ratio) / log1p(1.0)
-        # Clamp ratio to (-1, ∞) so log1p stays in its valid domain.
-        safe_ratio = ratio.clip(lower=-1 + 1e-9)
-        result[var] = 100.0 * np.log1p(safe_ratio) / _LOG_SCALE
+        if std_val == 0 or np.isnan(std_val):
+            # All countries have identical values — assign median percentile.
+            logger.debug(
+                "Variable '%s': std == 0 — all valid countries assigned 50.0.", var
+            )
+            pct = raw.copy()
+            pct[valid_mask] = 50.0
+            pct[~valid_mask] = np.nan
+            result[var] = pct
+            continue
+
+        z_valid = (raw_valid - mean_val) / std_val
+
+        # ── Step 2: Percentile conversion (0–100) ────────────────────────
+        ranks = rankdata(z_valid.values, method="average")
+        pct_valid = ranks / n_valid * 100
+
+        pct = pd.Series(np.nan, index=raw.index, dtype=float)
+        pct[valid_mask] = pct_valid
+
+        # ── Step 3: Invert for "lower is better" variables ───────────────
+        if var in inverted_variables:
+            pct[valid_mask] = 100.0 - pct[valid_mask]
+
+        result[var] = pct
 
     logger.info(
-        "USA-baseline log-normalisation complete: %d variables across %d countries.",
+        "Z-score + percentile normalisation complete: %d variables across %d countries.",
         len(variables),
         len(df),
     )

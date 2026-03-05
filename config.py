@@ -121,17 +121,25 @@ RULE2_MISSING_CONCENTRATION = {
 # -----------------------------------------------------------------------------
 # TIER THRESHOLDS (configurable)
 # -----------------------------------------------------------------------------
-# Scoring benchmarks against USA = 100.  Scores may exceed 100.
+# Percentile-based scoring (Z-score + percentile hybrid).  Scores range
+# roughly 5–100 with 20 countries (rankdata / n * 100).  USA is not anchored
+# at any fixed value — it ranks by its actual percentile across the set.
+#
+# Tier boundaries map to quartile-style bands:
+#   ≥ 75  → top ~quartile (strong opportunity)
+#   55–74 → above median
+#   35–54 → below median but investable
+#   < 35  → structural challenge
 TIER_THRESHOLDS = {
-    "tier1_min": 110,  # US-Outperformer — materially stronger than U.S. baseline
-    "tier2_min": 90,   # Competitive Alternative — comparable to U.S.
-    "tier3_min": 70,   # Developing Opportunity — below U.S. but investable
-    # Below 70 → Tier 4 — Structural Challenge
+    "tier1_min": 75,  # Top-quartile Performer — strong structural opportunity
+    "tier2_min": 55,  # Above-Average Market — above median across the set
+    "tier3_min": 35,  # Developing Opportunity — below median but investable
+    # Below 35 → Tier 4 — Structural Challenge
 }
 
 TIER_LABELS = {
-    1: "Tier 1 — US-Outperformer",
-    2: "Tier 2 — Competitive Alternative",
+    1: "Tier 1 — Top-Quartile Performer",
+    2: "Tier 2 — Above-Average Market",
     3: "Tier 3 — Developing Opportunity",
     4: "Tier 4 — Structural Challenge",
 }
