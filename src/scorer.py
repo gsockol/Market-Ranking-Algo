@@ -5,8 +5,9 @@ Composite score computation and tier assignment.
 
 Score formula (per country):
     composite_score = Σ (normalised_value[v] × weight[v])  for all v
-    result is a weighted sum of USA-relative ratios, × 100.
-    USA scores 100; countries better than USA may exceed 100.
+    Normalised values are already log-compressed scores (USA = 100 per variable).
+    The weighted sum is taken directly — no further ×100 multiplication.
+    USA composite score = 100; countries better than USA may exceed 100.
 
 Only variables with a non-NaN normalised value contribute.
 (Missing variables are already zeroed in the weight matrix by weighter.py,
@@ -56,7 +57,8 @@ def compute_scores(
     ----------
     normalized_df : pd.DataFrame
         Output of normalizer.normalize_all.  Index aligns with original df.
-        Columns = scored variable keys; values in [0, 1] or NaN.
+        Columns = scored variable keys; values are log-compressed scores
+        (USA = 100.0 per variable) or NaN.
     weight_matrix : dict
         {country: {variable_key: float}} from weighter.build_weight_matrix.
     categories : dict
@@ -112,7 +114,7 @@ def compute_scores(
                 v = norm_row.get(var, np.nan)
                 if w > 0 and pd.notna(v):
                     cat_sum += v * w
-            cat_contribs[f"contrib_{cat_key}"] = round(cat_sum * 100, 4)
+            cat_contribs[f"contrib_{cat_key}"] = round(cat_sum, 4)
             composite += cat_sum
 
         # Normalise by actual weight sum (handles partial-category-missing edge case)
@@ -120,7 +122,7 @@ def compute_scores(
         if weight_sum > 0:
             composite = composite / weight_sum
 
-        composite_score = round(composite * 100, 4)
+        composite_score = round(composite, 4)
         tier = _assign_tier(composite_score, tier_thresholds, tier_labels)
 
         record = {

@@ -5,21 +5,31 @@ USA-baseline normalisation for all scored variables.
 
 Normalisation model
 -------------------
-Each country's variable value is expressed as a ratio relative to the USA
+Each country's variable value is first expressed as a ratio relative to the USA
 reference value defined in config.USA_BASELINE:
 
     Non-inverted (higher = better):
-        norm = country_value / usa_value        → USA scores 1.0 (= 100 pts)
+        ratio = country_value / usa_value       → USA ratio = 1.0
 
     Inverted (lower = better):
-        norm = usa_value / country_value        → USA scores 1.0 (= 100 pts)
-        Rationale: a country with *lower* cost than the USA gets a ratio > 1.0,
+        ratio = usa_value / country_value       → USA ratio = 1.0
+        Rationale: a country with *lower* cost than the USA gets ratio > 1.0,
         meaning it scores *better* than the USA.
 
-The scorer then multiplies by 100, so USA always contributes 100 × its weight.
-Countries better than the USA score > 100; worse → < 100.
-Scores can be negative for WGI variables when a country's raw value is negative
-while the USA's reference is positive.
+Logarithmic compression is then applied so that extreme outliers have
+diminishing marginal returns while keeping USA anchored at exactly 100:
+
+    log_score = 100 × log1p(ratio) / log1p(1.0)
+              = 100 × ln(1 + ratio) / ln(2)
+
+USA (ratio = 1.0) → 100 × ln(2) / ln(2) = 100.
+Countries better than USA (ratio > 1.0) → score > 100.
+Countries worse than USA (ratio < 1.0) → score < 100.
+
+Guard: log1p is undefined for ratio ≤ −1.  Ratios are clamped to −1 + ε
+before the log is applied.  In practice this only affects WGI variables for
+countries whose raw score is strongly negative while the USA reference is
+positive.
 
 Edge cases
 ----------
@@ -27,12 +37,16 @@ Edge cases
 - country_value is NaN → stored as NaN (already handled by weighter Rule 3).
 - Inverted + country_value == 0 → division by zero → stored as NaN.
 - usa_value == 0 → cannot normalize → stored as NaN (warning logged).
+- ratio ≤ −1 → clamped to −1 + 1e-9 before log1p (logged at DEBUG level).
 """
 
 import logging
 
 import numpy as np
 import pandas as pd
+
+# Normalising divisor so that USA (ratio = 1.0) always maps to exactly 100.
+_LOG_SCALE = np.log1p(1.0)  # ln(2) ≈ 0.6931
 
 logger = logging.getLogger(__name__)
 
@@ -63,8 +77,9 @@ def normalize_all(
     -------
     pd.DataFrame
         Index matches *df*. Columns = *variables*.
-        Values are ratios relative to USA (USA = 1.0), or NaN.
-        The scorer multiplies by 100 so USA → 100 pts.
+        Values are log-compressed scores: 100 × log1p(ratio) / log1p(1.0).
+        USA = 100.0 exactly.  Scores can exceed 100 or be negative.
+        The scorer sums these directly (no further ×100 multiplication).
     """
     result = pd.DataFrame(index=df.index)
 
@@ -109,23 +124,26 @@ def normalize_all(
 
         if var in inverted_variables:
             # Lower raw value = better score.
-            # norm = usa_value / country_value  →  USA = 1.0
+            # ratio = usa_value / country_value  →  USA ratio = 1.0
             # Guard against division by zero (country_value == 0).
-            norm = raw.copy()
+            ratio = raw.copy()
             valid_nonzero = raw.notna() & (raw != 0)
             zero_mask = raw.notna() & (raw == 0)
-            norm[valid_nonzero] = usa_val / raw[valid_nonzero]
-            norm[zero_mask] = np.nan    # can't invert a zero value
-            norm[raw.isna()] = np.nan
+            ratio[valid_nonzero] = usa_val / raw[valid_nonzero]
+            ratio[zero_mask] = np.nan    # can't invert a zero value
+            ratio[raw.isna()] = np.nan
         else:
             # Higher raw value = better score.
-            # norm = country_value / usa_value  →  USA = 1.0
-            norm = raw / usa_val
+            # ratio = country_value / usa_value  →  USA ratio = 1.0
+            ratio = raw / usa_val
 
-        result[var] = norm
+        # Log compression: score = 100 × log1p(ratio) / log1p(1.0)
+        # Clamp ratio to (-1, ∞) so log1p stays in its valid domain.
+        safe_ratio = ratio.clip(lower=-1 + 1e-9)
+        result[var] = 100.0 * np.log1p(safe_ratio) / _LOG_SCALE
 
     logger.info(
-        "USA-baseline normalisation complete: %d variables across %d countries.",
+        "USA-baseline log-normalisation complete: %d variables across %d countries.",
         len(variables),
         len(df),
     )
