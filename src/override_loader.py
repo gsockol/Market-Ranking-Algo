@@ -24,13 +24,9 @@ import yaml
 
 logger = logging.getLogger(__name__)
 
-# Variables that must come from manual input (no reliable public API)
-_MANUAL_PRIMARY = {
-    "corporate_tax_rate",
-    "labor_cost_index",
-    "real_estate_cost_index",
-    "middle_class_pct",
-}
+# Variable defaulted to 0 when all data sources return nothing.
+# Prevents "no data" warnings and avoids triggering Rule 1.
+_CAGR_DEFAULT = 0.0
 
 
 def load_yaml_overrides(yaml_path: str) -> dict:
@@ -155,7 +151,19 @@ def merge_overrides(
                     audit[country][var] = "manual_prompt"
                     continue
 
-            # 5. Genuinely missing → will trigger Rule 3 in weighter
+            # 5. gym_membership_cagr: default to 0 instead of missing
+            #    This prevents Rule 1 from triggering and stops "no data" warnings.
+            if var == "gym_membership_cagr":
+                df.loc[mask, var] = _CAGR_DEFAULT
+                audit[country][var] = "defaulted_to_zero"
+                logger.info(
+                    "%s / gym_membership_cagr: no data — defaulted to 0.0 "
+                    "(Rule 1 will not trigger).",
+                    country,
+                )
+                continue
+
+            # 6. Genuinely missing → will trigger Rule 3 in weighter
             audit[country][var] = "missing"
             logger.info(
                 "%s / %s: no data from any source — will apply Rule 3 redistribution.",

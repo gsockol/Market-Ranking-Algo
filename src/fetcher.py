@@ -193,27 +193,18 @@ def compute_financing_scores(raw_components: dict, countries: list) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Youth population (World Bank — sum of four age-band indicators)
+# Working-age population (World Bank SP.POP.1564.TO.ZS)
+# Replaces the four-band youth metric. Single indicator — fewer missing data.
 # ---------------------------------------------------------------------------
 
-_YOUTH_INDICATORS = [
-    "SP.POP.1519.TO.ZS",
-    "SP.POP.2024.TO.ZS",
-    "SP.POP.2529.TO.ZS",
-    "SP.POP.3034.TO.ZS",
-]
-
-
-def _fetch_youth_pct(session, cache_dir, ttl_hours, no_cache, iso3):
-    total = 0.0
-    any_data = False
-    for ind in _YOUTH_INDICATORS:
-        series = _fetch_wb_series(session, cache_dir, ttl_hours, no_cache, iso3, ind, mrv=5)
-        val = _latest_value(series)
-        if val is not None:
-            total += val
-            any_data = True
-    return round(total, 4) if any_data else None
+def _fetch_working_age_pct(session, cache_dir, ttl_hours, no_cache, iso3):
+    """Return % of population aged 15–64 (working age), or None."""
+    series = _fetch_wb_series(
+        session, cache_dir, ttl_hours, no_cache,
+        iso3, "SP.POP.1564.TO.ZS", mrv=5
+    )
+    val = _latest_value(series)
+    return round(val, 4) if val is not None else None
 
 
 # ---------------------------------------------------------------------------
@@ -476,9 +467,18 @@ def fetch_all_external_data(
 
         # ── World Bank: institutional / macro indicators ─────────────────────
 
-        s = _fetch_wb_series(session, cache_path, ttl_hours, no_cache,
-                              iso3, wb_indicators["ease_of_doing_business"], mrv=5)
-        d["ease_of_doing_business"] = _latest_value(s)
+        rq = _latest_value(_fetch_wb_series(session, cache_path, ttl_hours, no_cache,
+                              iso3, wb_indicators["regulatory_quality"], mrv=5))
+        ge = _latest_value(_fetch_wb_series(session, cache_path, ttl_hours, no_cache,
+                              iso3, wb_indicators["govt_effectiveness"], mrv=5))
+        if rq is not None and ge is not None:
+            d["ease_of_doing_business"] = round((rq + ge) / 2, 4)
+        elif rq is not None:
+            d["ease_of_doing_business"] = rq
+        elif ge is not None:
+            d["ease_of_doing_business"] = ge
+        else:
+            d["ease_of_doing_business"] = None
 
         s = _fetch_wb_series(session, cache_path, ttl_hours, no_cache,
                               iso3, wb_indicators["political_stability"], mrv=5)
@@ -496,7 +496,7 @@ def fetch_all_external_data(
                               iso3, wb_indicators["usd_exchange_rate"], mrv=10)
         d["currency_volatility"] = _coefficient_of_variation(s)
 
-        d["youth_population_pct"] = _fetch_youth_pct(
+        d["working_age_population_pct"] = _fetch_working_age_pct(
             session, cache_path, ttl_hours, no_cache, iso3
         )
 

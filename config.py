@@ -40,9 +40,9 @@ WEIGHTS = {
 
     # --- Demand Indicators (15%) ---
     # Structural demand signals for HVLP target demographic
-    "youth_population_pct":   0.050,   # % population aged 15–34
-    "middle_class_pct":       0.050,   # % population middle class (World Bank proxy)
-    "avg_gym_spend_pct_gdp":  0.050,   # (Current Dues×12) ÷ GDP per Capita — affordability signal
+    "working_age_population_pct": 0.050,  # % population aged 15–64 (World Bank SP.POP.1564.TO.ZS)
+    "middle_class_pct":           0.050,  # % population middle class (WB Q3+Q4 income quintile shares)
+    "avg_gym_spend_pct_gdp":      0.050,  # (Current Dues×12) ÷ GDP per Capita — affordability signal
 }
 
 # -----------------------------------------------------------------------------
@@ -86,7 +86,7 @@ VARIABLE_CATEGORIES = {
         "real_estate_cost_index",
     ],
     "demand_indicators": [
-        "youth_population_pct",
+        "working_age_population_pct",
         "middle_class_pct",
         "avg_gym_spend_pct_gdp",
     ],
@@ -121,25 +121,29 @@ RULE2_MISSING_CONCENTRATION = {
 # -----------------------------------------------------------------------------
 # TIER THRESHOLDS (configurable)
 # -----------------------------------------------------------------------------
+# Scoring benchmarks against USA = 100.  Scores may exceed 100.
 TIER_THRESHOLDS = {
-    "tier1_min": 75,   # Tier 1 – Strong Enter
-    "tier2_min": 55,   # Tier 2 – Attractive
-    "tier3_min": 35,   # Tier 3 – Neutral
-    # Below tier3_min → Tier 4 – Avoid
+    "tier1_min": 110,  # Outperforming — materially stronger than U.S. baseline
+    "tier2_min": 90,   # Competitive Alternative — comparable to U.S.
+    "tier3_min": 70,   # Developing Opportunity — below U.S. but investable
+    "tier4_min": 50,   # Structural Headwinds — operational disadvantages vs U.S.
+    # Below 50 → Tier 5 — High Risk / Deprioritize
 }
 
 TIER_LABELS = {
-    1: "Tier 1 – Strong Enter",
-    2: "Tier 2 – Attractive",
-    3: "Tier 3 – Neutral",
-    4: "Tier 4 – Avoid",
+    1: "Tier 1 — Outperforming",
+    2: "Tier 2 — Competitive Alternative",
+    3: "Tier 3 — Developing Opportunity",
+    4: "Tier 4 — Structural Headwinds",
+    5: "Tier 5 — High Risk / Deprioritize",
 }
 
 TIER_COLORS = {
-    1: "#22c55e",   # green
-    2: "#3b82f6",   # blue
-    3: "#f59e0b",   # amber
-    4: "#ef4444",   # red
+    1: "#7c3aed",   # purple  (outperforming)
+    2: "#22c55e",   # green   (competitive)
+    3: "#3b82f6",   # blue    (developing)
+    4: "#f59e0b",   # amber   (headwinds)
+    5: "#ef4444",   # red     (high risk)
 }
 
 # -----------------------------------------------------------------------------
@@ -189,21 +193,58 @@ COUNTRY_ISO3_MAP = {
 # WORLD BANK API INDICATOR CODES
 # -----------------------------------------------------------------------------
 WB_INDICATORS = {
-    "ease_of_doing_business":   "IC.BUS.EASE.XQ",      # Discontinued 2019
-    "political_stability":      "PV.EST",               # WGI
-    "rule_of_law":              "RL.EST",               # WGI
-    "inflation_rate":           "FP.CPI.TOTL.ZG",      # CPI annual %
-    "usd_exchange_rate":        "PA.NUS.FCRF",          # For currency volatility calc
-    "domestic_credit_pct_gdp":  "FS.AST.PRVT.GD.ZS",  # GFDD financing component
-    "account_ownership_pct":    "FX.OWN.TOTL.ZS",      # GFDD financing component
-    "bank_branches_per_100k":   "FB.CBK.BRCH.P5",      # GFDD financing component
-    "youth_15_19_pct":          "SP.POP.1519.TO.ZS",   # Age band
-    "youth_20_24_pct":          "SP.POP.2024.TO.ZS",   # Age band
-    "youth_25_29_pct":          "SP.POP.2529.TO.ZS",   # Age band
-    "youth_30_34_pct":          "SP.POP.3034.TO.ZS",   # Age band
-    "pop_15_64_pct":            "SP.POP.1564.TO.ZS",   # Fallback for youth estimate
-    "income_share_q3":          "SI.DST.03RD.20",      # 3rd income quintile %
-    "income_share_q4":          "SI.DST.04TH.20",      # 4th income quintile %
+    # Ease of Doing Business (now: WGI Regulatory Quality + Government Effectiveness)
+    "regulatory_quality":       "RQ.EST",              # WGI Regulatory Quality
+    "govt_effectiveness":       "GE.EST",              # WGI Government Effectiveness
+    "political_stability":      "PV.EST",              # WGI Political Stability
+    "rule_of_law":              "RL.EST",              # WGI Rule of Law
+    "inflation_rate":           "FP.CPI.TOTL.ZG",     # CPI annual %
+    "usd_exchange_rate":        "PA.NUS.FCRF",         # For currency volatility calc
+    "domestic_credit_pct_gdp":  "FS.AST.PRVT.GD.ZS", # GFDD financing component
+    "account_ownership_pct":    "FX.OWN.TOTL.ZS",     # GFDD financing component
+    "bank_branches_per_100k":   "FB.CBK.BRCH.P5",     # GFDD financing component
+    "working_age_population_pct": "SP.POP.1564.TO.ZS",# Working age population 15–64 %
+    "income_share_q3":          "SI.DST.03RD.20",     # 3rd income quintile %
+    "income_share_q4":          "SI.DST.04TH.20",     # 4th income quintile %
+}
+
+# -----------------------------------------------------------------------------
+# USA BASELINE VALUES
+# Each scored variable's reference value for the USA.
+# All country normalized scores are calculated as (country / USA) = ratio,
+# stored with USA = 1.0 so that composite × 100 gives USA = 100.
+#
+# Derived values calculated from spec inputs:
+#   Market Size: 45,700  |  Cur Pen: 25.0%  |  Fut Pen: 30%
+#   Population: 349M     |  GDP/Capita: $90,012  |  CAGR: 5.6%
+# -----------------------------------------------------------------------------
+USA_BASELINE = {
+    # Market Opportunity
+    "opportunity_usd_m":          9_176.0,   # Potential - Current market size
+    "potential_market_size":      54_876.0,  # implied_future_members × future_dues × 12
+    "gym_membership_cagr":        5.6,       # from spec
+
+    # Penetration Headroom
+    "penetration_headroom":       0.05,      # 30% − 25% = 5 pp
+    "concentration":              3.24,      # 000s inhabitants per gym (from spec)
+
+    # Operational Risk
+    "ease_of_doing_business":     1.58,      # WGI (RQ + GE) / 2, USA 2022 approx
+    "political_stability":        0.54,      # WGI PV.EST, USA 2022 approx
+    "inflation_rate":             3.5,       # USA CPI % 2023
+    "currency_volatility":        4.0,       # USD trade-weighted std dev, approx
+    "rule_of_law":                1.54,      # WGI RL.EST, USA 2022 approx
+    "financing_accessibility":    92.0,      # GFDD composite (0–100), USA approx
+
+    # Cost Structure (inverted — lower is better)
+    "corporate_tax_rate":         21.0,      # USA statutory federal CIT rate
+    "labor_cost_index":           100.0,     # US = 100 by definition
+    "real_estate_cost_index":     140.0,     # OECD RHPI for USA, approx 2022
+
+    # Demand Indicators
+    "working_age_population_pct": 65.0,      # SP.POP.1564.TO.ZS, USA approx
+    "middle_class_pct":           34.0,      # WB Q3+Q4 income shares, USA approx
+    "avg_gym_spend_pct_gdp":      0.582,     # (current_dues × 12) / gdp_per_capita
 }
 
 # -----------------------------------------------------------------------------
