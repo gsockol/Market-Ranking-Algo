@@ -35,7 +35,7 @@ _VAR_LABELS = {
     "corporate_tax_rate":       "Corporate Tax Rate",
     "labor_cost_index":         "Labour Cost Index",
     "real_estate_cost_index":   "Real Estate Cost Index",
-    "working_age_population_pct":     "Working Age Population % (15–64)",
+    "youth_population_pct":           "Youth / Working Age Population % (15–64)",
     "middle_class_pct":         "Middle Class %",
     "avg_gym_spend_pct_gdp":    "Avg Gym Spend as % of GDP",
 }

@@ -40,7 +40,7 @@ WEIGHTS = {
 
     # --- Demand Indicators (15%) ---
     # Structural demand signals for HVLP target demographic
-    "working_age_population_pct": 0.050,  # % population aged 15–64 (World Bank SP.POP.1564.TO.ZS)
+    "youth_population_pct":           0.050,  # % population aged 15–64 (World Bank SP.POP.1564.TO.ZS)
     "middle_class_pct":           0.050,  # % population middle class (WB Q3+Q4 income quintile shares)
     "avg_gym_spend_pct_gdp":      0.050,  # (Current Dues×12) ÷ GDP per Capita — affordability signal
 }
@@ -86,7 +86,7 @@ VARIABLE_CATEGORIES = {
         "real_estate_cost_index",
     ],
     "demand_indicators": [
-        "working_age_population_pct",
+        "youth_population_pct",
         "middle_class_pct",
         "avg_gym_spend_pct_gdp",
     ],
@@ -123,27 +123,24 @@ RULE2_MISSING_CONCENTRATION = {
 # -----------------------------------------------------------------------------
 # Scoring benchmarks against USA = 100.  Scores may exceed 100.
 TIER_THRESHOLDS = {
-    "tier1_min": 110,  # Outperforming — materially stronger than U.S. baseline
+    "tier1_min": 110,  # US-Outperformer — materially stronger than U.S. baseline
     "tier2_min": 90,   # Competitive Alternative — comparable to U.S.
     "tier3_min": 70,   # Developing Opportunity — below U.S. but investable
-    "tier4_min": 50,   # Structural Headwinds — operational disadvantages vs U.S.
-    # Below 50 → Tier 5 — High Risk / Deprioritize
+    # Below 70 → Tier 4 — Structural Challenge
 }
 
 TIER_LABELS = {
-    1: "Tier 1 — Outperforming",
+    1: "Tier 1 — US-Outperformer",
     2: "Tier 2 — Competitive Alternative",
     3: "Tier 3 — Developing Opportunity",
-    4: "Tier 4 — Structural Headwinds",
-    5: "Tier 5 — High Risk / Deprioritize",
+    4: "Tier 4 — Structural Challenge",
 }
 
 TIER_COLORS = {
     1: "#7c3aed",   # purple  (outperforming)
     2: "#22c55e",   # green   (competitive)
     3: "#3b82f6",   # blue    (developing)
-    4: "#f59e0b",   # amber   (headwinds)
-    5: "#ef4444",   # red     (high risk)
+    4: "#f59e0b",   # amber   (structural challenge)
 }
 
 # -----------------------------------------------------------------------------
@@ -203,7 +200,7 @@ WB_INDICATORS = {
     "domestic_credit_pct_gdp":  "FS.AST.PRVT.GD.ZS", # GFDD financing component
     "account_ownership_pct":    "FX.OWN.TOTL.ZS",     # GFDD financing component
     "bank_branches_per_100k":   "FB.CBK.BRCH.P5",     # GFDD financing component
-    "working_age_population_pct": "SP.POP.1564.TO.ZS",# Working age population 15–64 %
+    "youth_population_pct":       "SP.POP.1564.TO.ZS", # Population aged 15–64 % of total
     "income_share_q3":          "SI.DST.03RD.20",     # 3rd income quintile %
     "income_share_q4":          "SI.DST.04TH.20",     # 4th income quintile %
 }
@@ -242,7 +239,7 @@ USA_BASELINE = {
     "real_estate_cost_index":     140.0,     # OECD RHPI for USA, approx 2022
 
     # Demand Indicators
-    "working_age_population_pct": 65.0,      # SP.POP.1564.TO.ZS, USA approx
+    "youth_population_pct":       65.0,      # SP.POP.1564.TO.ZS, USA approx
     "middle_class_pct":           34.0,      # WB Q3+Q4 income shares, USA approx
     "avg_gym_spend_pct_gdp":      0.582,     # (current_dues × 12) / gdp_per_capita
 }
@@ -379,5 +376,5 @@ CACHE_EXPIRY_HOURS = 48
 # OUTPUT SETTINGS
 # -----------------------------------------------------------------------------
 OUTPUT_DIR = "output"
-DASHBOARD_FILENAME = "hvlp_market_ranking.html"
+DASHBOARD_FILENAME = "dashboard.html"
 EXCEL_FILENAME = "hvlp_market_ranking.xlsx"

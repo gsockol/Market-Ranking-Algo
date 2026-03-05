@@ -29,19 +29,17 @@ logger = logging.getLogger(__name__)
 
 def _assign_tier(score: float, thresholds: dict, tier_labels: dict) -> str:
     """
-    Map a USA-benchmark score to a tier label.
-    USA = 100 → Tier 2 (Competitive Alternative).
+    Map a USA-benchmark score to a tier label (4-tier system).
+    USA = 100 → Tier 2 (Competitive Alternative, 90–109).
     Scores may exceed 100 (Tier 1 threshold = 110).
     """
-    if score >= thresholds["tier1_min"]:        # >= 110
+    if score >= thresholds["tier1_min"]:   # >= 110
         return tier_labels[1]
-    if score >= thresholds["tier2_min"]:        # >= 90
+    if score >= thresholds["tier2_min"]:   # >= 90
         return tier_labels[2]
-    if score >= thresholds["tier3_min"]:        # >= 70
+    if score >= thresholds["tier3_min"]:   # >= 70
         return tier_labels[3]
-    if score >= thresholds.get("tier4_min", 50):  # >= 50
-        return tier_labels[4]
-    return tier_labels.get(5, tier_labels[4])   # < 50 → Tier 5
+    return tier_labels[4]                  # < 70 → Tier 4
 
 
 def compute_scores(
