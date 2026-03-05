@@ -33,13 +33,13 @@ def _assign_tier(score: float, thresholds: dict, tier_labels: dict) -> str:
     Map a percentile composite score (0–100) to a tier label (4-tier system).
     Tier 1 ≥ 75 (top quartile), Tier 2 ≥ 55, Tier 3 ≥ 35, Tier 4 < 35.
     """
-    if score >= thresholds["tier1_min"]:   # >= 110
+    if score >= thresholds["tier1_min"]:   # >= 75
         return tier_labels[1]
-    if score >= thresholds["tier2_min"]:   # >= 90
+    if score >= thresholds["tier2_min"]:   # >= 55
         return tier_labels[2]
-    if score >= thresholds["tier3_min"]:   # >= 70
+    if score >= thresholds["tier3_min"]:   # >= 35
         return tier_labels[3]
-    return tier_labels[4]                  # < 70 → Tier 4
+    return tier_labels[4]                  # < 35 → Tier 4
 
 
 def compute_scores(
