@@ -12,42 +12,46 @@
 # To disable a variable: set its weight to 0.0 and redistribute manually.
 # -----------------------------------------------------------------------------
 WEIGHTS = {
-    # --- Market Opportunity (≈34.3%) ---
-    # Franchisor priority: royalty stream scale and long-run development potential
-    # Note: target weights summed to 102%; each value below is proportionally
-    # scaled by ÷1.02 so the dict sums to exactly 1.0000.
-    "opportunity_usd_m":      0.1964,  # ($M) Potential Market Size − Current Market Size
-    "potential_market_size":  0.1078,  # ($M) Implied Future Members × Future Dues × 12
-    "gym_membership_cagr":    0.0392,  # % CAGR of gym memberships (3–5yr); manual input
+    # --- Market Opportunity (26%) ---
+    # Franchisor priority: royalty stream scale and long-run development potential.
+    # Reduced from 34% to prevent the largest-absolute-market countries from
+    # anchoring the full ranking; freed weight moves to demand indicators.
+    "opportunity_usd_m":      0.14,    # ($M) Potential Market Size − Current Market Size
+    "potential_market_size":  0.08,    # ($M) Implied Future Members × Future Dues × 12
+    "gym_membership_cagr":    0.04,    # % CAGR of gym memberships (3–5yr); manual input
                                        # Kept low — missing data treated as 0% otherwise
                                        # biases against underpenetrated markets.
 
-    # --- Penetration Headroom (≈13.7%) ---
+    # --- Penetration Headroom (14%) ---
     # Underpenetration = runway for franchisee multi-unit development agreements
-    "penetration_headroom":   0.1176,  # Future Penetration % − Current Penetration %
-    "concentration":          0.0196,  # 000s inhabitants per HVLP gym (higher = less saturated)
+    "penetration_headroom":   0.12,    # Future Penetration % − Current Penetration %
+    "concentration":          0.02,    # 000s inhabitants per HVLP gym (higher = less saturated)
 
-    # --- Operational / Institutional Risk (≈14.7%) ---
+    # --- Operational / Institutional Risk (15%) ---
     # Contract enforceability, regulatory efficiency, macro stability
-    "ease_of_doing_business": 0.0294,  # World Bank WGI GE.EST (higher = better)
-    "political_stability":    0.0196,  # World Bank WGI PV.EST (−2.5 to +2.5)
-    "inflation_rate":         0.0196,  # Annual CPI %; INVERTED (lower = better score)
-    "currency_volatility":    0.0196,  # 3yr std dev of % chg in USD rate; INVERTED
-    "rule_of_law":            0.0294,  # World Bank WGI RL.EST (−2.5 to +2.5)
-    "financing_accessibility": 0.0294, # Composite: credit depth, account access, bank branches
+    "ease_of_doing_business": 0.03,    # World Bank WGI GE.EST (higher = better)
+    "political_stability":    0.02,    # World Bank WGI PV.EST (−2.5 to +2.5)
+    "inflation_rate":         0.02,    # Annual CPI %; INVERTED (lower = better score)
+    "currency_volatility":    0.02,    # 3yr std dev of % chg in USD rate; INVERTED
+    "rule_of_law":            0.03,    # World Bank WGI RL.EST (−2.5 to +2.5)
+    "financing_accessibility": 0.03,   # Composite: credit depth, account access, bank branches
 
-    # --- Cost Structure (≈14.7%) ---
+    # --- Cost Structure (14%) ---
     # Lower costs → better franchisee unit economics → faster scaling
-    "corporate_tax_rate":     0.0294,  # Statutory rate %; INVERTED
-    "labor_cost_index":       0.0490,  # Index (US=100); INVERTED
-    "real_estate_cost_index": 0.0686,  # Real house price index (OECD RHPI); INVERTED
+    "corporate_tax_rate":     0.03,    # Statutory rate %; INVERTED
+    "labor_cost_index":       0.05,    # Index (US=100); INVERTED
+    "real_estate_cost_index": 0.06,    # Real house price index (OECD RHPI); INVERTED
 
-    # --- Demand Indicators (≈22.5%) ---
-    # Structural demand signals for HVLP target demographic
-    "youth_population_pct":   0.0784,  # % population aged 15–64 (World Bank SP.POP.1564.TO.ZS)
-    "middle_class_pct":       0.0882,  # % population middle class (WB Q3+Q4 income quintile shares)
-    "avg_gym_spend_pct_gdp":  0.0588,  # (Current Dues×12) ÷ GDP per Capita — affordability signal
+    # --- Demand Indicators (27%) ---
+    # Structural demand signals for HVLP target demographic.
+    # Increased from 22.5% to better capture affordability and middle-class
+    # consumer base — signals that differentiate mid-size markets (e.g. Brazil,
+    # Portugal) from pure scale plays.
+    "youth_population_pct":   0.08,    # % population aged 15–64 (World Bank SP.POP.1564.TO.ZS)
+    "middle_class_pct":       0.13,    # % population middle class (WB Q3+Q4 income quintile shares)
+    "avg_gym_spend_pct_gdp":  0.10,    # (Current Dues×12) ÷ GDP per Capita — affordability signal
 }
+# sum = 1.0000 exactly: 14+8+4+12+2+3+2+2+2+3+3+3+5+6+8+13+10 = 100 ✓
 
 # -----------------------------------------------------------------------------
 # INVERTED VARIABLES
@@ -103,32 +107,42 @@ VARIABLE_CATEGORIES = {
 # -----------------------------------------------------------------------------
 
 # Rule 1: If gym_membership_cagr is missing
-# CAGR weight (0.0392) is redistributed proportionally to opportunity_usd_m
-# and potential_market_size using their base weight ratio (0.1964 : 0.1078).
-# opp  override = 0.1964 + 0.0392 × (0.1964 / 0.3042) ≈ 0.2217
-# pms  override = 0.1078 + 0.0392 × (0.1078 / 0.3042) ≈ 0.1175
-# Sum check: 0.2217 + 0.1175 + 0 = 0.3392 vs original 0.1964 + 0.1078 + 0.0392 = 0.3434
-# (minor rounding delta absorbed; weighter normalises by _weight_sum)
+# CAGR weight (0.04) is redistributed proportionally to opportunity_usd_m
+# and potential_market_size using their base weight ratio (0.14 : 0.08 = 7:4).
+# opp  override = 0.14 + 0.04 × (0.14 / 0.22) = 0.14 + 0.02545 ≈ 0.1655
+# pms  override = 0.08 + 0.04 × (0.08 / 0.22) = 0.08 + 0.01455 ≈ 0.0945
+# Sum check: 0.1655 + 0.0945 + 0 = 0.26 = 0.14 + 0.08 + 0.04 ✓
 RULE1_MISSING_CAGR = {
     "zero_out": "gym_membership_cagr",
     "override": {
-        "opportunity_usd_m": 0.2217,
-        "potential_market_size": 0.1175,
+        "opportunity_usd_m":     0.1655,
+        "potential_market_size": 0.0945,
     },
 }
 
 # Rule 2: If concentration is missing
-# Concentration weight (0.0196) added directly to penetration_headroom.
-# penetration_headroom override = 0.1176 + 0.0196 = 0.1372
+# Concentration weight (0.02) added directly to penetration_headroom.
+# penetration_headroom override = 0.12 + 0.02 = 0.14
 RULE2_MISSING_CONCENTRATION = {
     "zero_out": "concentration",
     "override": {
-        "penetration_headroom": 0.1372,
+        "penetration_headroom": 0.14,
     },
 }
 
 # Rule 3: All other missing variables — redistribute proportionally within category.
 # (Handled programmatically in scoring.py — no static config needed.)
+
+# -----------------------------------------------------------------------------
+# OUTLIER CAPPING
+# Applied to high-skew market-size variables before Z-scoring so that the
+# two or three largest absolute markets do not anchor the entire percentile
+# scale.  Only the upper tail is Winsorized; the lower tail is unchanged.
+# This narrows the spread at the top without altering any country's rank
+# among the non-capped majority.
+# -----------------------------------------------------------------------------
+OUTLIER_CAP_VARIABLES  = {"opportunity_usd_m", "potential_market_size"}
+OUTLIER_CAP_PERCENTILE = 0.90   # cap values above the 90th percentile
 
 # -----------------------------------------------------------------------------
 # TIER THRESHOLDS (configurable)

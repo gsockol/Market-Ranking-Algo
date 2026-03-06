@@ -51,6 +51,8 @@ def normalize_all(
     variables: list,
     inverted_variables: set,
     usa_baseline: dict,
+    outlier_cap_variables: set | None = None,
+    outlier_cap_percentile: float = 0.90,
 ) -> pd.DataFrame:
     """
     Normalise every variable in *variables* using Z-score + percentile hybrid.
@@ -67,6 +69,13 @@ def normalize_all(
     usa_baseline : dict
         {variable_key: usa_reference_value} — retained for API compatibility
         and downstream auditing; not used in normalisation math.
+    outlier_cap_variables : set[str] or None
+        Variable keys whose upper tail should be Winsorized before Z-scoring.
+        Values above the *outlier_cap_percentile* quantile are clipped to that
+        quantile value so that two or three extreme outliers do not anchor the
+        entire percentile scale.  Only the upper tail is capped.
+    outlier_cap_percentile : float
+        Upper quantile used for Winsorization (default 0.90 = 90th percentile).
 
     Returns
     -------
@@ -100,8 +109,20 @@ def normalize_all(
             result[var] = np.nan
             continue
 
-        # ── Step 1: Z-score across all valid countries ────────────────────
+        # ── Step 0 (optional): Winsorize upper tail ───────────────────────
+        # Clips values above the configured percentile so that two or three
+        # extreme outliers do not anchor the top of the percentile scale.
+        # Only the upper tail is affected; lower tail is unchanged.
         raw_valid = raw[valid_mask]
+        if outlier_cap_variables and var in outlier_cap_variables:
+            cap_val = float(np.percentile(raw_valid.values, outlier_cap_percentile * 100))
+            raw_valid = raw_valid.clip(upper=cap_val)
+            logger.debug(
+                "Variable '%s': upper tail Winsorized at %.4f (%.0f-th pct).",
+                var, cap_val, outlier_cap_percentile * 100,
+            )
+
+        # ── Step 1: Z-score across all valid countries ────────────────────
         mean_val = raw_valid.mean()
         std_val = raw_valid.std(ddof=1)
 

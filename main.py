@@ -185,9 +185,16 @@ def main():
     # ------------------------------------------------------------------
     # STEP 6 — Normalise
     # ------------------------------------------------------------------
-    logger.info("Step 6/10: Normalising variables (min-max, active dataset scope) …")
+    logger.info("Step 6/10: Normalising variables (Z-score + percentile, active dataset scope) …")
     from src.normalizer import normalize_all
-    normalized_df = normalize_all(df, scored_vars, cfg.INVERTED_VARIABLES, cfg.USA_BASELINE)
+    normalized_df = normalize_all(
+        df,
+        scored_vars,
+        cfg.INVERTED_VARIABLES,
+        cfg.USA_BASELINE,
+        outlier_cap_variables=cfg.OUTLIER_CAP_VARIABLES,
+        outlier_cap_percentile=cfg.OUTLIER_CAP_PERCENTILE,
+    )
 
     # ------------------------------------------------------------------
     # STEP 7 — Build weight matrix (Rules 1-3)
