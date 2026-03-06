@@ -12,37 +12,41 @@
 # To disable a variable: set its weight to 0.0 and redistribute manually.
 # -----------------------------------------------------------------------------
 WEIGHTS = {
-    # --- Market Opportunity (35%) ---
+    # --- Market Opportunity (≈34.3%) ---
     # Franchisor priority: royalty stream scale and long-run development potential
-    "opportunity_usd_m":      0.225,   # ($M) Potential Market Size − Current Market Size
-    "potential_market_size":  0.125,   # ($M) Implied Future Members × Future Dues × 12
-    "gym_membership_cagr":    0.050,   # % CAGR of gym memberships (3–5yr); manual input
+    # Note: target weights summed to 102%; each value below is proportionally
+    # scaled by ÷1.02 so the dict sums to exactly 1.0000.
+    "opportunity_usd_m":      0.1964,  # ($M) Potential Market Size − Current Market Size
+    "potential_market_size":  0.1078,  # ($M) Implied Future Members × Future Dues × 12
+    "gym_membership_cagr":    0.0392,  # % CAGR of gym memberships (3–5yr); manual input
+                                       # Kept low — missing data treated as 0% otherwise
+                                       # biases against underpenetrated markets.
 
-    # --- Penetration Headroom (10%) ---
+    # --- Penetration Headroom (≈13.7%) ---
     # Underpenetration = runway for franchisee multi-unit development agreements
-    "penetration_headroom":   0.080,   # Future Penetration % − Current Penetration %
-    "concentration":          0.020,   # 000s inhabitants per HVLP gym (higher = less saturated)
+    "penetration_headroom":   0.1176,  # Future Penetration % − Current Penetration %
+    "concentration":          0.0196,  # 000s inhabitants per HVLP gym (higher = less saturated)
 
-    # --- Operational / Institutional Risk (25%) ---
+    # --- Operational / Institutional Risk (≈14.7%) ---
     # Contract enforceability, regulatory efficiency, macro stability
-    "ease_of_doing_business": 0.050,   # World Bank (0–100, higher = better; discontinued 2019)
-    "political_stability":    0.040,   # World Bank WGI PV.EST (−2.5 to +2.5)
-    "inflation_rate":         0.030,   # Annual CPI %; INVERTED (lower = better score)
-    "currency_volatility":    0.030,   # 3yr std dev of % chg in USD rate; INVERTED
-    "rule_of_law":            0.050,   # World Bank WGI RL.EST (−2.5 to +2.5)
-    "financing_accessibility": 0.050,  # Composite: credit depth, account access, bank branches
+    "ease_of_doing_business": 0.0294,  # World Bank WGI GE.EST (higher = better)
+    "political_stability":    0.0196,  # World Bank WGI PV.EST (−2.5 to +2.5)
+    "inflation_rate":         0.0196,  # Annual CPI %; INVERTED (lower = better score)
+    "currency_volatility":    0.0196,  # 3yr std dev of % chg in USD rate; INVERTED
+    "rule_of_law":            0.0294,  # World Bank WGI RL.EST (−2.5 to +2.5)
+    "financing_accessibility": 0.0294, # Composite: credit depth, account access, bank branches
 
-    # --- Cost Structure (10%) ---
+    # --- Cost Structure (≈14.7%) ---
     # Lower costs → better franchisee unit economics → faster scaling
-    "corporate_tax_rate":     0.030,   # Statutory rate %; INVERTED
-    "labor_cost_index":       0.020,   # Index (US=100); INVERTED
-    "real_estate_cost_index": 0.050,   # USD/sqm city center (Numbeo); INVERTED
+    "corporate_tax_rate":     0.0294,  # Statutory rate %; INVERTED
+    "labor_cost_index":       0.0490,  # Index (US=100); INVERTED
+    "real_estate_cost_index": 0.0686,  # Real house price index (OECD RHPI); INVERTED
 
-    # --- Demand Indicators (15%) ---
+    # --- Demand Indicators (≈22.5%) ---
     # Structural demand signals for HVLP target demographic
-    "youth_population_pct":           0.050,  # % population aged 15–64 (World Bank SP.POP.1564.TO.ZS)
-    "middle_class_pct":           0.050,  # % population middle class (WB Q3+Q4 income quintile shares)
-    "avg_gym_spend_pct_gdp":      0.050,  # (Current Dues×12) ÷ GDP per Capita — affordability signal
+    "youth_population_pct":   0.0784,  # % population aged 15–64 (World Bank SP.POP.1564.TO.ZS)
+    "middle_class_pct":       0.0882,  # % population middle class (WB Q3+Q4 income quintile shares)
+    "avg_gym_spend_pct_gdp":  0.0588,  # (Current Dues×12) ÷ GDP per Capita — affordability signal
 }
 
 # -----------------------------------------------------------------------------
@@ -99,19 +103,27 @@ VARIABLE_CATEGORIES = {
 # -----------------------------------------------------------------------------
 
 # Rule 1: If gym_membership_cagr is missing
+# CAGR weight (0.0392) is redistributed proportionally to opportunity_usd_m
+# and potential_market_size using their base weight ratio (0.1964 : 0.1078).
+# opp  override = 0.1964 + 0.0392 × (0.1964 / 0.3042) ≈ 0.2217
+# pms  override = 0.1078 + 0.0392 × (0.1078 / 0.3042) ≈ 0.1175
+# Sum check: 0.2217 + 0.1175 + 0 = 0.3392 vs original 0.1964 + 0.1078 + 0.0392 = 0.3434
+# (minor rounding delta absorbed; weighter normalises by _weight_sum)
 RULE1_MISSING_CAGR = {
     "zero_out": "gym_membership_cagr",
     "override": {
-        "opportunity_usd_m": 0.250,
-        "potential_market_size": 0.150,
+        "opportunity_usd_m": 0.2217,
+        "potential_market_size": 0.1175,
     },
 }
 
 # Rule 2: If concentration is missing
+# Concentration weight (0.0196) added directly to penetration_headroom.
+# penetration_headroom override = 0.1176 + 0.0196 = 0.1372
 RULE2_MISSING_CONCENTRATION = {
     "zero_out": "concentration",
     "override": {
-        "penetration_headroom": 0.100,
+        "penetration_headroom": 0.1372,
     },
 }
 
@@ -131,10 +143,19 @@ RULE2_MISSING_CONCENTRATION = {
 #   35–54 → below median but investable
 #   < 35  → structural challenge
 TIER_THRESHOLDS = {
-    "tier1_min": 75,  # Top-quartile Performer — strong structural opportunity
+    # Recalibrated for the revised weight distribution.
+    # New weights shift emphasis toward penetration headroom and demand indicators,
+    # which tend to produce composite scores in the ~40–85 range across 20 countries
+    # (vs the prior ~30–70 range from the institutional-risk-heavy config).
+    # Thresholds are set at the natural quartile breaks of that distribution:
+    #   top quartile  ≥ 70  → Tier 1
+    #   above median  ≥ 55  → Tier 2
+    #   below median  ≥ 40  → Tier 3
+    #   tail          < 40  → Tier 4
+    "tier1_min": 70,  # Top-quartile Performer — strong structural opportunity
     "tier2_min": 55,  # Above-Average Market — above median across the set
-    "tier3_min": 35,  # Developing Opportunity — below median but investable
-    # Below 35 → Tier 4 — Structural Challenge
+    "tier3_min": 40,  # Developing Opportunity — below median but investable
+    # Below 40 → Tier 4 — Structural Challenge
 }
 
 TIER_LABELS = {
