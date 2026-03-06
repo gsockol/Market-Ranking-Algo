@@ -35,7 +35,7 @@ _VAR_LABELS = {
     "corporate_tax_rate":       "Corporate Tax Rate",
     "labor_cost_index":         "Labour Cost Index",
     "real_estate_cost_index":   "Real Estate Cost Index",
-    "youth_population_pct":     "Youth Population % (15–34)",
+    "youth_population_pct":           "Youth / Working Age Population % (15–64)",
     "middle_class_pct":         "Middle Class %",
     "avg_gym_spend_pct_gdp":    "Avg Gym Spend as % of GDP",
 }
@@ -90,7 +90,8 @@ def generate_commentary(
                 continue
             norm_val = norm_row.get(var, np.nan)
             if pd.notna(norm_val):
-                contributions.append((var, norm_val * w * 100))
+                # norm_val is a percentile score (0–100); contribution = percentile × weight
+                contributions.append((var, norm_val * w))
 
         contributions.sort(key=lambda x: x[1], reverse=True)
         top3 = contributions[:3]
@@ -110,7 +111,7 @@ def generate_commentary(
             norm_val = norm_row.get(var, np.nan)
             raw_val = raw_row.get(var, np.nan)
             w = weights.get(var, 0.0)
-            if pd.notna(norm_val) and norm_val < 0.35 and w > 0:
+            if pd.notna(norm_val) and norm_val < 35 and w > 0:  # 35th percentile = poor score
                 label = _VAR_LABELS.get(var, var)
                 if pd.notna(raw_val):
                     risk_flags.append(f"{label} ({raw_val:.1f})")

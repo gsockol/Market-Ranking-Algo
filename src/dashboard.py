@@ -41,7 +41,7 @@ _VAR_LABELS = {
     "corporate_tax_rate":       "Corporate Tax Rate (inv.)",
     "labor_cost_index":         "Labour Cost Index (inv.)",
     "real_estate_cost_index":   "Real Estate Cost Index (inv.)",
-    "youth_population_pct":     "Youth Population % (15–34)",
+    "youth_population_pct":       "Youth / Working Age Population % (15–64)",
     "middle_class_pct":         "Middle Class %",
     "avg_gym_spend_pct_gdp":    "Avg Gym Spend as % of GDP",
 }
@@ -63,22 +63,26 @@ _CAT_COLORS = {
 }
 
 _SOURCE_BADGES = {
-    "csv_derived":    ('<span class="badge badge-csv">CSV / Derived</span>', "Computed from CSV inputs"),
-    "api":            ('<span class="badge badge-api">API</span>', "World Bank API"),
-    "manual_yaml":    ('<span class="badge badge-manual">Manual</span>', "overrides/manual_inputs.yaml"),
-    "manual_prompt":  ('<span class="badge badge-manual">Manual (prompt)</span>', "Interactive input"),
-    "missing":        ('<span class="badge badge-missing">Missing</span>', "No data — weight redistributed"),
+    "csv_derived":      ('<span class="badge badge-csv">CSV / Derived</span>', "Computed from CSV inputs"),
+    "api":              ('<span class="badge badge-api">API</span>', "World Bank / OECD / Trading Economics"),
+    "manual_yaml":      ('<span class="badge badge-manual">Manual YAML</span>', "overrides/manual_inputs.yaml"),
+    "manual_prompt":    ('<span class="badge badge-manual">Manual (prompt)</span>', "Interactive terminal input"),
+    "manual_input":     ('<span class="badge badge-manual">Manual Input</span>', "User-entered via widget/GUI"),
+    "defaulted_to_zero":('<span class="badge badge-csv">Defaulted 0</span>', "No CAGR data — defaulted to 0.0"),
+    "missing":          ('<span class="badge badge-missing">Missing</span>', "No data — weight redistributed"),
 }
 
 
 def _tier_color(tier: str) -> str:
-    if "1" in tier:
-        return "#22c55e"
-    if "2" in tier:
-        return "#3b82f6"
-    if "3" in tier:
-        return "#f59e0b"
-    return "#ef4444"
+    if "Tier 1" in tier:
+        return "#7c3aed"   # purple — outperforming
+    if "Tier 2" in tier:
+        return "#22c55e"   # green  — competitive
+    if "Tier 3" in tier:
+        return "#3b82f6"   # blue   — developing
+    if "Tier 4" in tier:
+        return "#f59e0b"   # amber  — headwinds
+    return "#ef4444"       # red    — high risk
 
 
 def _fmt(val, decimals=2, suffix=""):
@@ -88,6 +92,7 @@ def _fmt(val, decimals=2, suffix=""):
 
 
 def _score_bar(score: float, color: str, width_px: int = 120) -> str:
+    # Scale against 100: percentile scores are 0–100, so 100 fills the bar.
     pct = max(0, min(100, score))
     filled = round(pct / 100 * width_px)
     return (
@@ -104,7 +109,8 @@ def _cat_mini_bars(score_row: pd.Series, categories: dict) -> str:
         contrib = score_row.get(contrib_key, 0.0) or 0.0
         color = _CAT_COLORS.get(cat_key, "#6b7280")
         label = _CAT_LABELS.get(cat_key, cat_key)
-        bar_w = round(contrib / 100 * 60)
+        # Scale to 60px; 40pts ≈ max category contribution (market_opportunity at p100)
+        bar_w = round(contrib / 40 * 60)
         bar_w = max(0, min(60, bar_w))
         parts.append(
             f'<div class="mini-bar-row" title="{label}: {contrib:.1f}pts">'
@@ -149,7 +155,8 @@ def _detail_panel(
             base_w = base_weights.get(var, 0.0)
             src = country_audit.get(var, "missing")
             badge_html, _ = _SOURCE_BADGES.get(src, ("", ""))
-            contrib = (norm_val * w * 100) if pd.notna(norm_val) else 0.0
+            # norm_val is a percentile score (0–100); contribution = percentile × weight
+            contrib = (norm_val * w) if pd.notna(norm_val) else 0.0
 
             # Weight adjustment indicator
             if abs(w - base_w) > 1e-6:
@@ -160,7 +167,7 @@ def _detail_panel(
                 w_str = f'{w*100:.1f}%'
 
             raw_str = _fmt(raw_val, 2) if pd.notna(raw_val) else "—"
-            norm_str = f"{norm_val:.3f}" if pd.notna(norm_val) else "—"
+            norm_str = f"{norm_val:.1f}" if pd.notna(norm_val) else "—"
             contrib_str = f"{contrib:.2f}pts" if pd.notna(norm_val) and w > 0 else "—"
 
             rows_html.append(
@@ -183,7 +190,7 @@ def _detail_panel(
             f'</div>'
             f'<table class="var-table"><thead><tr>'
             f'<th>Variable</th><th>Source</th><th>Raw Value</th>'
-            f'<th>Normalised</th><th>Weight</th><th>Contribution</th>'
+            f'<th>Percentile Score</th><th>Weight</th><th>Contribution</th>'
             f'</tr></thead><tbody>'
             + "".join(rows_html)
             + '</tbody></table></div>'
@@ -197,10 +204,26 @@ def _detail_panel(
         f'</div>'
     )
 
+    # Global Rank Banner — transparent, all text #9600fa, rank and score same class
+    rank_val = score_row.get("rank", "—")
+    score_val = score_row.get("composite_score", 0.0)
+    total_countries = score_row.get("_total", "")
+    tier_val = score_row.get("tier", "")
+    rank_banner_html = (
+        f'<div class="rank-banner">'
+        f'<span class="rank-banner-text">Global Rank: </span>'
+        f'<span class="rank-banner-emphasis">{rank_val}</span>'
+        f'<span class="rank-banner-text"> &nbsp;|&nbsp; Score: </span>'
+        f'<span class="rank-banner-emphasis">{score_val:.1f}</span>'
+        f'<span class="rank-banner-text"> &nbsp;|&nbsp; {html.escape(str(tier_val))}</span>'
+        f'</div>'
+    )
+
     return (
         f'<tr class="detail-row" id="detail-{html.escape(country)}" style="display:none">'
         f'<td colspan="10">'
         f'<div class="detail-panel">'
+        + rank_banner_html
         + commentary_html
         + "".join(cat_blocks)
         + '</div></td></tr>'
@@ -239,7 +262,7 @@ def _main_row(
         f'<td class="rank-cell">#{rank}</td>'
         f'<td class="country-cell"><strong>{html.escape(country)}</strong></td>'
         f'<td class="score-cell">'
-        f'<span class="score-num" style="color:{tc}">{score:.1f}</span>'
+        f'<span class="score-num">{score:.1f}</span>'
         + _score_bar(score, tc)
         + '</td>'
         f'<td><span class="tier-badge" style="background:{tc}">{html.escape(tier)}</span></td>'
@@ -264,13 +287,13 @@ def _main_row(
 _CSS = """
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-       background: #f8fafc; color: #1e293b; font-size: 14px; }
+       background: #f8fafc; color: #000000; font-size: 14px; }
 a { color: #3b82f6; }
 
 /* Header */
-.header { background: #0f172a; color: #f1f5f9; padding: 24px 32px; }
-.header h1 { font-size: 22px; font-weight: 700; letter-spacing: -0.5px; }
-.header .subtitle { font-size: 12px; color: #94a3b8; margin-top: 4px; }
+.header { background: #290241; color: #FAEEFF; padding: 24px 32px; }
+.header h1 { font-size: 22px; font-weight: 700; letter-spacing: -0.5px; color: #FAEEFF; }
+.header .subtitle { font-size: 12px; color: #d6b4f5; margin-top: 4px; }
 
 /* Summary cards */
 .summary-bar { display: flex; gap: 16px; padding: 20px 32px; flex-wrap: wrap; }
@@ -284,17 +307,18 @@ a { color: #3b82f6; }
 .table-wrap { padding: 0 32px 40px; overflow-x: auto; }
 table.rankings { width: 100%; border-collapse: collapse; background: #fff;
                  border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden; }
-table.rankings th { background: #f1f5f9; font-size: 11px; text-transform: uppercase;
-                    letter-spacing: 0.5px; color: #64748b; padding: 10px 14px;
-                    text-align: left; border-bottom: 2px solid #e2e8f0; cursor: pointer; }
-table.rankings th:hover { background: #e2e8f0; }
+table.rankings th { background: #9600fa; font-size: 11px; text-transform: uppercase;
+                    letter-spacing: 0.5px; color: #FAEEFF; padding: 10px 14px;
+                    text-align: left; border-bottom: 2px solid #7a00cc; cursor: pointer; }
+table.rankings th:hover { background: #7a00cc; }
 tr.main-row { cursor: pointer; transition: background 0.15s; }
 tr.main-row:hover { background: #f8fafc; }
 tr.main-row td { padding: 10px 14px; border-bottom: 1px solid #f1f5f9; vertical-align: middle; }
-.rank-cell { font-weight: 700; color: #94a3b8; width: 48px; }
+.rank-cell { font-weight: 700; color: #9600fa; width: 48px; }
 .country-cell { min-width: 130px; }
+.country-cell strong { color: #290241; }
 .score-cell { white-space: nowrap; }
-.score-num { font-size: 20px; font-weight: 700; margin-right: 8px; }
+.score-num { font-size: 20px; font-weight: 700; margin-right: 8px; color: #9600fa; }
 .score-bar-wrap { display: inline-block; height: 8px; background: #e2e8f0;
                   border-radius: 4px; vertical-align: middle; }
 .score-bar-fill { height: 8px; border-radius: 4px; }
@@ -310,6 +334,11 @@ tr.main-row td { padding: 10px 14px; border-bottom: 1px solid #f1f5f9; vertical-
 /* Detail panel */
 tr.detail-row td { padding: 0; border-bottom: 2px solid #e2e8f0; background: #f8fafc; }
 .detail-panel { padding: 20px 28px; }
+
+/* Global Rank Banner — transparent, all text #9600fa */
+.rank-banner { background: transparent; padding: 8px 0 14px; border: none; }
+.rank-banner-text { color: #9600fa; font-size: 14px; }
+.rank-banner-emphasis { color: #9600fa; font-weight: 700; font-size: 16px; }
 .commentary { background: #eff6ff; border-left: 4px solid #3b82f6;
               border-radius: 4px; padding: 12px 16px; margin-bottom: 16px; }
 .commentary p { margin-bottom: 4px; font-size: 13px; line-height: 1.5; }
@@ -320,27 +349,27 @@ tr.detail-row td { padding: 0; border-bottom: 2px solid #e2e8f0; background: #f8
 .cat-block-header { display: flex; justify-content: space-between; align-items: center;
                     padding: 6px 12px; background: #fff; margin-bottom: 4px;
                     border-radius: 4px; border: 1px solid #e2e8f0; }
-.cat-block-label { font-weight: 600; font-size: 13px; }
-.cat-block-contrib { font-size: 12px; color: #64748b; font-weight: 600; }
+.cat-block-label { font-weight: 600; font-size: 13px; color: #290241; }
+.cat-block-contrib { font-size: 12px; color: #290241; font-weight: 600; }
 table.var-table { width: 100%; border-collapse: collapse; font-size: 12px; }
-table.var-table th { background: #f1f5f9; padding: 6px 10px; text-align: left;
-                     font-size: 10px; text-transform: uppercase; color: #64748b;
+table.var-table th { background: #9600fa; padding: 6px 10px; text-align: left;
+                     font-size: 10px; text-transform: uppercase; color: #FAEEFF;
                      letter-spacing: 0.4px; }
 table.var-table td { padding: 6px 10px; border-bottom: 1px solid #f1f5f9; }
 table.var-table td.num { text-align: right; font-family: monospace; }
 table.var-table td.contrib { font-weight: 600; color: #0f172a; }
-.var-label { color: #374151; }
+.var-label { color: #000000; }
 .weight-adj { color: #d97706; font-weight: 600; }
 .weight-base { color: #94a3b8; font-size: 10px; }
 .weight-zero { color: #ef4444; font-size: 11px; }
 
-/* Badges */
+/* Badges — dark text for readability */
 .badge { display: inline-block; padding: 1px 7px; border-radius: 10px;
          font-size: 10px; font-weight: 600; }
-.badge-csv    { background: #dbeafe; color: #1d4ed8; }
-.badge-api    { background: #d1fae5; color: #065f46; }
-.badge-manual { background: #fef3c7; color: #92400e; }
-.badge-missing{ background: #fee2e2; color: #991b1b; }
+.badge-csv    { background: transparent; color: #1d4ed8; border: 1px solid #1d4ed8; }
+.badge-api    { background: transparent; color: #065f46; border: 1px solid #065f46; }
+.badge-manual { background: transparent; color: #92400e; border: 1px solid #92400e; }
+.badge-missing{ background: transparent; color: #991b1b; border: 1px solid #991b1b; }
 
 /* Legend */
 .legend { display: flex; gap: 16px; padding: 0 32px 12px; flex-wrap: wrap; }
@@ -348,8 +377,8 @@ table.var-table td.contrib { font-weight: 600; color: #0f172a; }
 .legend-dot { width: 12px; height: 12px; border-radius: 50%; }
 
 /* Footer */
-.footer { background: #0f172a; color: #94a3b8; padding: 20px 32px; font-size: 11px; line-height: 1.8; }
-.footer strong { color: #e2e8f0; }
+.footer { background: #290241; color: #d6b4f5; padding: 20px 32px; font-size: 11px; line-height: 1.8; }
+.footer strong { color: #FAEEFF; }
 
 /* Sort arrow */
 th.sort-asc::after { content: " ↑"; }
@@ -529,7 +558,7 @@ def generate_dashboard(
     Run date: {run_date} &nbsp;|&nbsp;
     Model: 17-variable weighted composite &nbsp;|&nbsp;
     Countries: {n_countries} &nbsp;|&nbsp;
-    Normalisation scope: current dataset only
+    Scoring model: Z-score + percentile hybrid (0–100 scale, relative ranking)
   </div>
 </div>
 
@@ -564,7 +593,7 @@ def generate_dashboard(
   <strong>Methodology</strong><br>
   17 variables across 5 categories: Market Opportunity (35%), Penetration Headroom (10%),
   Operational Risk (25%), Cost Structure (10%), Demand Indicators (15%).<br>
-  All variables min-max normalised across the active country set only.
+  All variables normalised using Z-score + percentile hybrid (0–100 scale). Each variable's score reflects its percentile rank across all countries in the set — extreme outliers no longer dominate contributions. Inverted variables are flipped so that 100 always means "best".
   Inverted variables: Inflation Rate, Currency Volatility, Corporate Tax Rate,
   Labour Cost Index, Real Estate Cost Index.<br>
   Conditional rules: Rule 1 (CAGR missing → Opportunity 25%, Potential 15%);

@@ -187,7 +187,7 @@ def main():
     # ------------------------------------------------------------------
     logger.info("Step 6/10: Normalising variables (min-max, active dataset scope) …")
     from src.normalizer import normalize_all
-    normalized_df = normalize_all(df, scored_vars, cfg.INVERTED_VARIABLES)
+    normalized_df = normalize_all(df, scored_vars, cfg.INVERTED_VARIABLES, cfg.USA_BASELINE)
 
     # ------------------------------------------------------------------
     # STEP 7 — Build weight matrix (Rules 1-3)

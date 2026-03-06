@@ -4,8 +4,10 @@ src/scorer.py
 Composite score computation and tier assignment.
 
 Score formula (per country):
-    composite_score = Σ (normalised_value[v] × weight[v])  for all v
-    result is in [0, 1]; multiplied by 100 for the 0–100 display scale.
+    composite_score = Σ (percentile_score[v] × weight[v])  for all v
+    Percentile scores are 0–100 (output of Z-score + percentile hybrid normaliser).
+    The weighted sum is taken directly — no ×100 multiplication.
+    Composite scores reflect relative ranking across the country set (0–100 range).
 
 Only variables with a non-NaN normalised value contribute.
 (Missing variables are already zeroed in the weight matrix by weighter.py,
@@ -27,14 +29,17 @@ logger = logging.getLogger(__name__)
 
 
 def _assign_tier(score: float, thresholds: dict, tier_labels: dict) -> str:
-    """Map a 0–100 score to a tier label using config thresholds."""
-    if score >= thresholds["tier1_min"]:
+    """
+    Map a percentile composite score (0–100) to a tier label (4-tier system).
+    Tier 1 ≥ 75 (top quartile), Tier 2 ≥ 55, Tier 3 ≥ 35, Tier 4 < 35.
+    """
+    if score >= thresholds["tier1_min"]:   # >= 75
         return tier_labels[1]
-    if score >= thresholds["tier2_min"]:
+    if score >= thresholds["tier2_min"]:   # >= 55
         return tier_labels[2]
-    if score >= thresholds["tier3_min"]:
+    if score >= thresholds["tier3_min"]:   # >= 35
         return tier_labels[3]
-    return tier_labels[4]
+    return tier_labels[4]                  # < 35 → Tier 4
 
 
 def compute_scores(
@@ -51,7 +56,8 @@ def compute_scores(
     ----------
     normalized_df : pd.DataFrame
         Output of normalizer.normalize_all.  Index aligns with original df.
-        Columns = scored variable keys; values in [0, 1] or NaN.
+        Columns = scored variable keys; values are percentile scores (0–100)
+        from Z-score + percentile hybrid normalisation, or NaN.
     weight_matrix : dict
         {country: {variable_key: float}} from weighter.build_weight_matrix.
     categories : dict
@@ -107,7 +113,7 @@ def compute_scores(
                 v = norm_row.get(var, np.nan)
                 if w > 0 and pd.notna(v):
                     cat_sum += v * w
-            cat_contribs[f"contrib_{cat_key}"] = round(cat_sum * 100, 4)
+            cat_contribs[f"contrib_{cat_key}"] = round(cat_sum, 4)
             composite += cat_sum
 
         # Normalise by actual weight sum (handles partial-category-missing edge case)
@@ -115,7 +121,7 @@ def compute_scores(
         if weight_sum > 0:
             composite = composite / weight_sum
 
-        composite_score = round(composite * 100, 4)
+        composite_score = round(composite, 4)
         tier = _assign_tier(composite_score, tier_thresholds, tier_labels)
 
         record = {

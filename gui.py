@@ -87,7 +87,7 @@ VAR_LABELS = {
     "corporate_tax_rate":     "Corporate Tax Rate (%)",
     "labor_cost_index":       "Labour Cost Index",
     "real_estate_cost_index": "Real Estate Cost Index",
-    "youth_population_pct":   "Youth Population (15–34%)",
+    "youth_population_pct":       "Youth / Working Age Population % (15–64)",
     "middle_class_pct":       "Middle Class (%)",
     "avg_gym_spend_pct_gdp":  "Avg Gym Spend as % GDP",
 }
@@ -182,7 +182,7 @@ def run_pipeline(extra_rows=None, log_fn=None):
     df, audit = merge_overrides(df, external_data, yaml_overrides, scored_vars)
 
     _log("Step 6 — Normalising (min-max, active dataset scope) …")
-    normalized_df = normalize_all(df, scored_vars, cfg.INVERTED_VARIABLES)
+    normalized_df = normalize_all(df, scored_vars, cfg.INVERTED_VARIABLES, cfg.USA_BASELINE)
 
     _log("Step 7 — Building per-country weight matrix (Rules 1–3) …")
     availability = {

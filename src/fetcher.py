@@ -7,7 +7,7 @@ Sources
 -------
 World Bank WDI / WGI
     ease_of_doing_business, political_stability, rule_of_law,
-    inflation_rate, currency_volatility, youth_population_pct,
+    inflation_rate, currency_volatility, youth_population_pct (SP.POP.1564.TO.ZS),
     financing_accessibility, middle_class_pct (Q3+Q4 income shares)
 
 OECD Stats API (stats.oecd.org)
@@ -193,27 +193,18 @@ def compute_financing_scores(raw_components: dict, countries: list) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Youth population (World Bank — sum of four age-band indicators)
+# Youth population % (World Bank SP.POP.1564.TO.ZS, population ages 15–64)
+# Uses the 15–64 working-age band as the youth demand proxy.
 # ---------------------------------------------------------------------------
 
-_YOUTH_INDICATORS = [
-    "SP.POP.1519.TO.ZS",
-    "SP.POP.2024.TO.ZS",
-    "SP.POP.2529.TO.ZS",
-    "SP.POP.3034.TO.ZS",
-]
-
-
 def _fetch_youth_pct(session, cache_dir, ttl_hours, no_cache, iso3):
-    total = 0.0
-    any_data = False
-    for ind in _YOUTH_INDICATORS:
-        series = _fetch_wb_series(session, cache_dir, ttl_hours, no_cache, iso3, ind, mrv=5)
-        val = _latest_value(series)
-        if val is not None:
-            total += val
-            any_data = True
-    return round(total, 4) if any_data else None
+    """Return % of population aged 15–64, or None."""
+    series = _fetch_wb_series(
+        session, cache_dir, ttl_hours, no_cache,
+        iso3, "SP.POP.1564.TO.ZS", mrv=5
+    )
+    val = _latest_value(series)
+    return round(val, 4) if val is not None else None
 
 
 # ---------------------------------------------------------------------------
@@ -476,9 +467,9 @@ def fetch_all_external_data(
 
         # ── World Bank: institutional / macro indicators ─────────────────────
 
-        s = _fetch_wb_series(session, cache_path, ttl_hours, no_cache,
-                              iso3, wb_indicators["ease_of_doing_business"], mrv=5)
-        d["ease_of_doing_business"] = _latest_value(s)
+        ge = _latest_value(_fetch_wb_series(session, cache_path, ttl_hours, no_cache,
+                              iso3, wb_indicators["govt_effectiveness"], mrv=5))
+        d["ease_of_doing_business"] = ge  # WGI Government Effectiveness (GE.EST)
 
         s = _fetch_wb_series(session, cache_path, ttl_hours, no_cache,
                               iso3, wb_indicators["political_stability"], mrv=5)
