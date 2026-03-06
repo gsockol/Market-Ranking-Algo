@@ -10,6 +10,7 @@ output/hvlp_market_ranking.xlsx
 
 # API cache (machine-local, regenerated automatically)
 cache/*.json
+.cache/
 
 # Virtual environments
 .venv/
