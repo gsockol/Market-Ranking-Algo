@@ -141,7 +141,7 @@ overrides:
     youth_population_pct: 67.1
     financing_accessibility: 55.0
 
-  UK:
+  United Kingdom:
     corporate_tax_rate: 25.0
     labor_cost_index: 65.0
     real_estate_cost_index: 14800.0

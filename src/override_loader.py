@@ -78,6 +78,7 @@ def merge_overrides(
     yaml_overrides: dict,
     scored_variables: list,
     interactive: bool = False,
+    gui_cagr_overrides: dict | None = None,
 ) -> tuple[pd.DataFrame, dict]:
     """
     Merge all data sources into *df* and build an audit trail.
@@ -96,12 +97,17 @@ def merge_overrides(
     interactive : bool
         If True, prompt the user for any variable still missing after
         YAML override application.
+    gui_cagr_overrides : dict | None
+        Optional {country: float} from the GUI Overrides panel.  When provided,
+        a matching entry takes precedence over API, YAML, and GDP-proxy values
+        for gym_membership_cagr.
 
     Returns
     -------
     (pd.DataFrame, dict)
         Updated DataFrame and audit dict:
-        {country: {variable: "csv_derived"|"api"|"manual_yaml"|"manual_prompt"|"missing"}}
+        {country: {variable: "csv_derived"|"api"|"gui_override"|"manual_yaml"
+                            |"gdp_cagr_proxy"|"manual_prompt"|"missing"}}
     """
     audit = {row["country"]: {} for _, row in df.iterrows()}
 
@@ -136,12 +142,35 @@ def merge_overrides(
                 audit[country][var] = "api"
                 continue
 
+            # 2.5. GUI CAGR override (highest non-CSV/API priority for CAGR)
+            if var == "gym_membership_cagr" and gui_cagr_overrides:
+                gui_val = gui_cagr_overrides.get(country)
+                if gui_val is not None:
+                    df.loc[mask, var] = float(gui_val)
+                    audit[country][var] = "gui_override"
+                    continue
+
             # 3. YAML manual override
             yaml_val = yaml_ctry.get(var)
             if yaml_val is not None:
                 df.loc[mask, var] = float(yaml_val)
                 audit[country][var] = "manual_yaml"
                 continue
+
+            # 3.5. GDP CAGR proxy — auto-fetched from World Bank, used only for
+            #      gym_membership_cagr when no explicit value is available.
+            if var == "gym_membership_cagr":
+                gdp_proxy = ext.get("gdp_cagr_proxy")
+                if gdp_proxy is not None and not (
+                    isinstance(gdp_proxy, float) and np.isnan(gdp_proxy)
+                ):
+                    df.loc[mask, var] = float(gdp_proxy)
+                    audit[country][var] = "gdp_cagr_proxy"
+                    logger.info(
+                        "%s / gym_membership_cagr: using GDP growth proxy %.2f%%.",
+                        country, gdp_proxy,
+                    )
+                    continue
 
             # 4. Interactive prompt
             if interactive:

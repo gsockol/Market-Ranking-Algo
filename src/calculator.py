@@ -37,7 +37,11 @@ def _safe_divide(numerator, denominator):
     return result
 
 
-def calculate_derived_metrics(df: pd.DataFrame, dues_increase_pct: dict) -> pd.DataFrame:
+def calculate_derived_metrics(
+    df: pd.DataFrame,
+    dues_increase_pct: dict,
+    penetration_overrides: dict | None = None,
+) -> pd.DataFrame:
     """
     Add all derived columns to *df* in-place and return it.
 
@@ -48,6 +52,12 @@ def calculate_derived_metrics(df: pd.DataFrame, dues_increase_pct: dict) -> pd.D
     dues_increase_pct : dict
         From config.DUES_INCREASE_PCT.
         Keys are country names; "default" key holds the fallback rate.
+    penetration_overrides : dict | None
+        Optional {country: target_penetration_fraction} from the GUI Overrides
+        panel.  When provided the matching country's future_penetration_pct
+        (i.e. the target penetration assumption) is replaced before
+        penetration_headroom is computed.  Silently ignored if the override
+        value is below the country's current_penetration_pct.
 
     Returns
     -------
@@ -64,6 +74,17 @@ def calculate_derived_metrics(df: pd.DataFrame, dues_increase_pct: dict) -> pd.D
         fut_pen   = row.get("future_penetration_pct")
         pop       = row.get("population_m")
         gdp_pc    = row.get("gdp_per_capita")
+
+        # Apply penetration target override when user has provided one via UI
+        if penetration_overrides and country in penetration_overrides:
+            override_val = penetration_overrides[country]
+            if pd.notna(cur_pen) and override_val < cur_pen:
+                logger.warning(
+                    "%s: penetration override %.4f < current %.4f — override ignored.",
+                    country, override_val, cur_pen,
+                )
+            else:
+                fut_pen = override_val
 
         derived = {}
 

@@ -461,12 +461,12 @@ def _normalize_oecd_ahr_to_index(raw_ahr: dict) -> dict:
 
 _TE_COUNTRY_NAME_MAP = {
     # TE name → our internal country name
-    "United Kingdom":        "UK",
-    "Korea, South":          "South Korea",
-    "Turkey":                "Turkiye",
-    "Korea":                 "South Korea",
-    "Czech Republic":        "Czech Republic",
-    "Slovak Republic":       "Slovakia",
+    # "United Kingdom" removed — TE name and internal name now match
+    "Korea, South":    "South Korea",
+    "Turkey":          "Turkiye",
+    "Korea":           "South Korea",
+    "Czech Republic":  "Czech Republic",
+    "Slovak Republic": "Slovakia",
 }
 
 
@@ -586,6 +586,7 @@ def fetch_all_external_data(
         ("inflation_rate",      wb_indicators["inflation_rate"],       5),
         ("usd_exchange_rate",   wb_indicators["usd_exchange_rate"],   10),
         ("youth_population",    "SP.POP.1564.TO.ZS",                  5),
+        ("gdp_growth",          "NY.GDP.MKTP.KD.ZG",                  7),  # GDP growth % — CAGR proxy
         ("fin_domestic_credit", _FINANCING_INDICATORS["domestic_credit"],   10),
         ("fin_account_ownership", _FINANCING_INDICATORS["account_ownership"], 10),
         ("fin_bank_branches",   _FINANCING_INDICATORS["bank_branches"],      10),
@@ -649,6 +650,17 @@ def fetch_all_external_data(
             d["middle_class_pct"] = round((q3 or 0.0) + (q4 or 0.0), 4)
         else:
             d["middle_class_pct"] = None
+
+        # GDP growth rate — 5-year average used as gym membership CAGR proxy
+        gdp_growth_series = _get_series("NY.GDP.MKTP.KD.ZG")
+        if gdp_growth_series:
+            valid_rates = [
+                obs["value"] for obs in gdp_growth_series
+                if isinstance(obs, dict) and obs.get("value") is not None
+            ][:5]  # use up to 5 most-recent years
+            d["gdp_cagr_proxy"] = round(sum(valid_rates) / len(valid_rates), 4) if valid_rates else None
+        else:
+            d["gdp_cagr_proxy"] = None
 
         # Financing components (cross-country normalisation happens after loop)
         financing_raw[country] = {

@@ -127,12 +127,34 @@ EXTRA_ISO3 = {
     "Morocco": "MAR", "Mexico": "MEX", "Argentina": "ARG", "Peru": "PER",
 }
 
+# ---------------------------------------------------------------------------
+# Pre-load CSV defaults for the Overrides tab
+# ---------------------------------------------------------------------------
+
+def _load_csv_defaults() -> dict:
+    """Return {country: {current_pen, future_pen, cagr}} from the preloaded CSV."""
+    try:
+        _df = ingest_csv(CSV_PATH, cfg.CSV_COLUMN_MAP)
+        return {
+            row["country"]: {
+                "current_pen": row.get("current_penetration_pct", float("nan")),
+                "future_pen":  row.get("future_penetration_pct",  float("nan")),
+                "cagr":        row.get("gym_membership_cagr",      None),
+            }
+            for _, row in _df.iterrows()
+        }
+    except Exception:
+        return {}
+
+_CSV_DEFAULTS = _load_csv_defaults()
+
 
 # ---------------------------------------------------------------------------
 # Pipeline orchestrator (shared by all three GUI modes)
 # ---------------------------------------------------------------------------
 
-def run_pipeline(extra_rows=None, log_fn=None):
+def run_pipeline(extra_rows=None, log_fn=None,
+                 penetration_overrides=None, cagr_overrides=None):
     """
     Execute the full 10-step scoring pipeline.
 
@@ -142,6 +164,10 @@ def run_pipeline(extra_rows=None, log_fn=None):
         Additional country rows to append to the preloaded CSV dataset.
     log_fn : callable | None
         Called with a status string at each major step (for GUI progress).
+    penetration_overrides : dict | None
+        {country: target_penetration_fraction} from the GUI Overrides tab.
+    cagr_overrides : dict | None
+        {country: cagr_float} from the GUI Overrides tab CAGR panel.
 
     Returns
     -------
@@ -161,7 +187,8 @@ def run_pipeline(extra_rows=None, log_fn=None):
     countries = df["country"].tolist()
 
     _log(f"Step 2 — Computing derived metrics for {len(countries)} countries …")
-    df = calculate_derived_metrics(df, cfg.DUES_INCREASE_PCT)
+    df = calculate_derived_metrics(df, cfg.DUES_INCREASE_PCT,
+                                   penetration_overrides=penetration_overrides)
 
     _log("Step 3 — Fetching external data (World Bank / OECD / Trading Economics) …")
     external_data = fetch_all_external_data(
@@ -179,10 +206,15 @@ def run_pipeline(extra_rows=None, log_fn=None):
 
     _log("Step 5 — Merging all data sources …")
     scored_vars = list(cfg.WEIGHTS.keys())
-    df, audit = merge_overrides(df, external_data, yaml_overrides, scored_vars)
+    df, audit = merge_overrides(df, external_data, yaml_overrides, scored_vars,
+                                gui_cagr_overrides=cagr_overrides)
 
-    _log("Step 6 — Normalising (min-max, active dataset scope) …")
-    normalized_df = normalize_all(df, scored_vars, cfg.INVERTED_VARIABLES, cfg.USA_BASELINE)
+    _log("Step 6 — Normalising (Z-score + percentile, active dataset scope) …")
+    normalized_df = normalize_all(
+        df, scored_vars, cfg.INVERTED_VARIABLES, cfg.USA_BASELINE,
+        outlier_cap_variables=cfg.OUTLIER_CAP_VARIABLES,
+        outlier_cap_percentile=cfg.OUTLIER_CAP_PERCENTILE,
+    )
 
     _log("Step 7 — Building per-country weight matrix (Rules 1–3) …")
     availability = {
@@ -479,7 +511,12 @@ class HVLPApp:
         self._nb.add(rankings_frame, text="  Rankings  ")
         self._build_rankings_tab(rankings_frame)
 
-        # Tab 2: Scorecard
+        # Tab 2: Overrides (CAGR + Penetration)
+        overrides_frame = ttk.Frame(self._nb)
+        self._nb.add(overrides_frame, text="  Overrides  ")
+        self._build_overrides_tab(overrides_frame)
+
+        # Tab 3: Scorecard
         scorecard_frame = ttk.Frame(self._nb)
         self._nb.add(scorecard_frame, text="  Scorecard  ")
         self._scorecard_text = scrolledtext.ScrolledText(
@@ -488,7 +525,7 @@ class HVLPApp:
         )
         self._scorecard_text.pack(fill=tk.BOTH, expand=True)
 
-        # Tab 3: Log
+        # Tab 4: Log
         log_frame = ttk.Frame(self._nb)
         self._nb.add(log_frame, text="  Log  ")
         self._log_text = scrolledtext.ScrolledText(
@@ -496,6 +533,187 @@ class HVLPApp:
             state=tk.DISABLED, bg="#1e1e1e", fg="#d4d4d4",
         )
         self._log_text.pack(fill=tk.BOTH, expand=True)
+
+    # -----------------------------------------------------------------------
+    # Overrides tab
+    # -----------------------------------------------------------------------
+
+    def _build_overrides_tab(self, parent):
+        """Build the Overrides tab with CAGR and Penetration override panels."""
+        self._cagr_entries: dict[str, tk.StringVar] = {}
+        self._pen_entries:  dict[str, tk.StringVar] = {}
+        self._pen_headroom_labels: dict[str, tk.Label] = {}
+        self._pen_error_labels:    dict[str, tk.Label] = {}
+
+        # Outer scrollable canvas
+        canvas = tk.Canvas(parent, highlightthickness=0)
+        vsb = ttk.Scrollbar(parent, orient=tk.VERTICAL, command=canvas.yview)
+        canvas.configure(yscrollcommand=vsb.set)
+        vsb.pack(side=tk.RIGHT, fill=tk.Y)
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        inner = ttk.Frame(canvas, padding=(20, 12))
+        window_id = canvas.create_window((0, 0), window=inner, anchor="nw")
+
+        def _on_frame_configure(event):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+        def _on_canvas_configure(event):
+            canvas.itemconfig(window_id, width=event.width)
+        inner.bind("<Configure>", _on_frame_configure)
+        canvas.bind("<Configure>", _on_canvas_configure)
+
+        # Mouse-wheel scroll on Windows/Linux
+        def _on_mousewheel(event):
+            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        canvas.bind_all("<MouseWheel>", _on_mousewheel)
+
+        # ── Section A: CAGR Overrides ────────────────────────────────────────
+        ttk.Label(inner, text="Gym Membership CAGR Overrides",
+                  font=("", 11, "bold")).grid(row=0, column=0, columnspan=4,
+                                              sticky="w", pady=(0, 2))
+        ttk.Label(
+            inner,
+            text="Leave blank to use GDP growth proxy (auto-fetched from World Bank) or default 0%.",
+            font=("", 9), foreground="#555",
+        ).grid(row=1, column=0, columnspan=4, sticky="w", pady=(0, 8))
+
+        hdr_kw = dict(font=("", 9, "bold"), padding=(4, 2))
+        ttk.Label(inner, text="Country",        **hdr_kw).grid(row=2, column=0, sticky="w")
+        ttk.Label(inner, text="Manual CAGR %",  **hdr_kw).grid(row=2, column=1, sticky="w", padx=(20, 0))
+        ttk.Label(inner, text="(GDP proxy used when blank)", **hdr_kw).grid(
+            row=2, column=2, columnspan=2, sticky="w", padx=(20, 0))
+        ttk.Separator(inner, orient=tk.HORIZONTAL).grid(
+            row=3, column=0, columnspan=4, sticky="ew", pady=(2, 6))
+
+        countries = sorted(_CSV_DEFAULTS.keys()) if _CSV_DEFAULTS else PRELOADED_COUNTRIES
+        for r, country in enumerate(countries, start=4):
+            ttk.Label(inner, text=country, width=22).grid(row=r, column=0, sticky="w", pady=1)
+            svar = tk.StringVar()
+            self._cagr_entries[country] = svar
+            ttk.Entry(inner, textvariable=svar, width=12).grid(
+                row=r, column=1, sticky="w", padx=(20, 0))
+
+        # ── Section B: Penetration Overrides ─────────────────────────────────
+        sep_row = 4 + len(countries)
+        ttk.Separator(inner, orient=tk.HORIZONTAL).grid(
+            row=sep_row, column=0, columnspan=4, sticky="ew", pady=(16, 8))
+
+        ttk.Label(inner, text="Penetration Opportunity Overrides",
+                  font=("", 11, "bold")).grid(row=sep_row + 1, column=0, columnspan=4,
+                                              sticky="w", pady=(0, 2))
+        ttk.Label(
+            inner,
+            text="Set target (future) penetration % per country. "
+                 "Must be \u2265 current penetration. Leave blank for CSV default.",
+            font=("", 9), foreground="#555",
+        ).grid(row=sep_row + 2, column=0, columnspan=4, sticky="w", pady=(0, 8))
+
+        hdr_row = sep_row + 3
+        ttk.Label(inner, text="Country",      **hdr_kw).grid(row=hdr_row, column=0, sticky="w")
+        ttk.Label(inner, text="Current %",    **hdr_kw).grid(row=hdr_row, column=1, sticky="w", padx=(20, 0))
+        ttk.Label(inner, text="Target %",     **hdr_kw).grid(row=hdr_row, column=2, sticky="w", padx=(20, 0))
+        ttk.Label(inner, text="Headroom",     **hdr_kw).grid(row=hdr_row, column=3, sticky="w", padx=(20, 0))
+        ttk.Separator(inner, orient=tk.HORIZONTAL).grid(
+            row=hdr_row + 1, column=0, columnspan=4, sticky="ew", pady=(2, 6))
+
+        data_start = hdr_row + 2
+        for r, country in enumerate(countries, start=data_start):
+            defaults = _CSV_DEFAULTS.get(country, {})
+            cur = defaults.get("current_pen", float("nan"))
+            fut = defaults.get("future_pen",  float("nan"))
+
+            cur_str = f"{cur * 100:.1f}%" if not (isinstance(cur, float) and np.isnan(cur)) else "—"
+            fut_str = f"{fut * 100:.1f}"  if not (isinstance(fut, float) and np.isnan(fut)) else ""
+
+            ttk.Label(inner, text=country, width=22).grid(row=r, column=0, sticky="w", pady=1)
+            ttk.Label(inner, text=cur_str).grid(row=r, column=1, sticky="w", padx=(20, 0))
+
+            svar = tk.StringVar(value=fut_str)
+            self._pen_entries[country] = svar
+
+            entry = ttk.Entry(inner, textvariable=svar, width=12)
+            entry.grid(row=r, column=2, sticky="w", padx=(20, 0))
+
+            # Headroom preview label
+            if not (isinstance(cur, float) and np.isnan(cur)) and not (isinstance(fut, float) and np.isnan(fut)):
+                headroom_str = f"{(fut - cur) * 100:.1f}%"
+                fg = "#16a34a"
+            else:
+                headroom_str = "—"
+                fg = "#555"
+            hdlbl = tk.Label(inner, text=headroom_str, foreground=fg, font=("", 9))
+            hdlbl.grid(row=r, column=3, sticky="w", padx=(20, 0))
+            self._pen_headroom_labels[country] = hdlbl
+
+            # Error label (initially hidden via empty text)
+            errlbl = tk.Label(inner, text="", foreground="#dc2626", font=("", 8))
+            errlbl.grid(row=r, column=4, sticky="w", padx=(8, 0))
+            self._pen_error_labels[country] = errlbl
+
+            # Trace callback for real-time validation & headroom preview
+            def _make_trace(c=country, cur_val=cur, hdlbl_ref=hdlbl, errlbl_ref=errlbl):
+                def _trace(*_):
+                    raw = self._pen_entries[c].get().strip()
+                    if not raw:
+                        # Restore CSV default
+                        d = _CSV_DEFAULTS.get(c, {})
+                        fut_v = d.get("future_pen", float("nan"))
+                        if not (isinstance(fut_v, float) and np.isnan(fut_v)) and \
+                           not (isinstance(cur_val, float) and np.isnan(cur_val)):
+                            hdlbl_ref.config(
+                                text=f"{(fut_v - cur_val) * 100:.1f}%",
+                                foreground="#16a34a",
+                            )
+                        else:
+                            hdlbl_ref.config(text="—", foreground="#555")
+                        errlbl_ref.config(text="")
+                        return
+                    try:
+                        val = float(raw) / 100.0
+                        if not (isinstance(cur_val, float) and np.isnan(cur_val)) and val < cur_val:
+                            hdlbl_ref.config(text="—", foreground="#555")
+                            errlbl_ref.config(
+                                text=f"Must be \u2265 {cur_val * 100:.1f}%")
+                        else:
+                            if not (isinstance(cur_val, float) and np.isnan(cur_val)):
+                                hdlbl_ref.config(
+                                    text=f"{(val - cur_val) * 100:.1f}%",
+                                    foreground="#16a34a",
+                                )
+                            errlbl_ref.config(text="")
+                    except ValueError:
+                        hdlbl_ref.config(text="—", foreground="#555")
+                        errlbl_ref.config(text="Invalid number")
+                return _trace
+            svar.trace_add("write", _make_trace())
+
+    def _collect_penetration_overrides(self) -> dict | None:
+        """Collect valid penetration override values from the Overrides tab."""
+        overrides = {}
+        for country, svar in self._pen_entries.items():
+            raw = svar.get().strip()
+            if raw:
+                try:
+                    val = float(raw) / 100.0  # user enters %, convert to fraction
+                    defaults = _CSV_DEFAULTS.get(country, {})
+                    cur = defaults.get("current_pen", 0.0)
+                    if not (isinstance(cur, float) and np.isnan(cur)) and val >= cur:
+                        overrides[country] = val
+                except ValueError:
+                    pass
+        return overrides or None
+
+    def _collect_cagr_overrides(self) -> dict | None:
+        """Collect manual CAGR values from the Overrides tab."""
+        overrides = {}
+        for country, svar in self._cagr_entries.items():
+            raw = svar.get().strip()
+            if raw:
+                try:
+                    overrides[country] = float(raw)
+                except ValueError:
+                    pass
+        return overrides or None
 
     def _build_rankings_tab(self, parent):
         cat_keys = list(cfg.VARIABLE_CATEGORIES.keys())
@@ -544,8 +762,12 @@ class HVLPApp:
         threading.Thread(target=self._run_all_worker, daemon=True).start()
 
     def _run_all_worker(self):
+        pen_overrides  = self._collect_penetration_overrides()
+        cagr_overrides = self._collect_cagr_overrides()
         try:
-            result = run_pipeline(log_fn=self._log)
+            result = run_pipeline(log_fn=self._log,
+                                  penetration_overrides=pen_overrides,
+                                  cagr_overrides=cagr_overrides)
             self.root.after(0, lambda: self._run_all_done(result))
         except Exception as exc:
             self.root.after(0, lambda: self._show_error(str(exc)))
@@ -579,8 +801,12 @@ class HVLPApp:
             self._show_scorecard(country)
 
     def _scorecard_worker(self, country):
+        pen_overrides  = self._collect_penetration_overrides()
+        cagr_overrides = self._collect_cagr_overrides()
         try:
-            result = run_pipeline(log_fn=self._log)
+            result = run_pipeline(log_fn=self._log,
+                                  penetration_overrides=pen_overrides,
+                                  cagr_overrides=cagr_overrides)
             (self._scores_df, self._full_df, self._normalized_df,
              self._weight_matrix, self._audit, _) = result
             self.root.after(0, lambda: self._scorecard_ready(country))
@@ -603,7 +829,7 @@ class HVLPApp:
         self._scorecard_text.delete("1.0", tk.END)
         self._scorecard_text.insert("1.0", text)
         self._scorecard_text.config(state=tk.DISABLED)
-        self._nb.select(1)
+        self._nb.select(2)  # Scorecard is now tab index 2 (Overrides inserted at 1)
 
     # -----------------------------------------------------------------------
     # Mode 3 — Add New Country
@@ -641,8 +867,12 @@ class HVLPApp:
         ).start()
 
     def _add_country_worker(self, country, row):
+        pen_overrides  = self._collect_penetration_overrides()
+        cagr_overrides = self._collect_cagr_overrides()
         try:
-            result = run_pipeline(extra_rows=[row], log_fn=self._log)
+            result = run_pipeline(extra_rows=[row], log_fn=self._log,
+                                  penetration_overrides=pen_overrides,
+                                  cagr_overrides=cagr_overrides)
             (self._scores_df, self._full_df, self._normalized_df,
              self._weight_matrix, self._audit, _) = result
             self.root.after(0, lambda: self._add_country_done(country))
