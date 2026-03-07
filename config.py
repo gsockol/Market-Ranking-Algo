@@ -12,34 +12,34 @@
 # To disable a variable: set its weight to 0.0 and redistribute manually.
 # -----------------------------------------------------------------------------
 WEIGHTS = {
-    # --- Market Opportunity (30%) ---
-    "opportunity_usd_m":       0.17,   # ($M) Potential Market Size − Current Market Size
-    "potential_market_size":   0.13,   # ($M) Implied Future Members × Future Dues × 12
-    "gym_membership_cagr":     0.02,   # 5yr CAGR of gym membership %; redistributed via Rule 1 if missing
+    # --- Market Opportunity (35%) ---
+    "opportunity_usd_m":       0.20,   # ($M) Potential Market Size − Current Market Size
+    "potential_market_size":   0.15,   # ($M) Implied Future Members × Future Dues × 12
 
-    # --- Penetration Headroom / Market Structure (24%) ---
-    "penetration_headroom":    0.20,   # Future Penetration % − Current Penetration %
-    "concentration":           0.04,   # Market concentration index; redistributed via Rule 2 if missing
+    # --- Penetration Headroom (25%) ---
+    "penetration_headroom":    0.25,   # Future Penetration % − Current Penetration %
+    "concentration":           0.0025, # Market concentration; redistributed via Rule 2 if missing
 
-    # --- Operational / Institutional Risk (9%) ---
-    "ease_of_doing_business":  0.02,   # World Bank WGI GE.EST (higher = better)
+    # --- Demand Indicators (20%) ---
+    "gym_membership_cagr":     0.04,   # 5yr CAGR of gym membership %; redistributed via Rule 1 if missing
+    "middle_class_pct":        0.10,   # % population middle class — primary demand signal
+    "avg_gym_spend_pct_gdp":   0.06,   # (Current Dues×12) ÷ GDP per Capita — affordability
+    "youth_population_pct":    0.0025, # % population aged 15–64 (World Bank)
+
+    # --- Cost Structure (15%) ---
+    "real_estate_cost_index":  0.08,   # USD/sqm prime retail; INVERTED (lower = better)
+    "labor_cost_index":        0.04,   # Index vs US=100; INVERTED (lower = better)
+    "corporate_tax_rate":      0.03,   # Statutory CIT rate %; INVERTED (lower = better)
+
+    # --- Operational Risk (5%) ---
+    "ease_of_doing_business":  0.01,   # World Bank WGI GE.EST (higher = better)
     "political_stability":     0.01,   # World Bank WGI PV.EST (higher = better)
-    "inflation_rate":          0.02,   # Annual CPI %; INVERTED (lower = better score)
-    "currency_volatility":     0.01,   # 3yr std dev of % chg in USD rate; INVERTED
-    "rule_of_law":             0.02,   # World Bank WGI RL.EST (−2.5 to +2.5)
-    "financing_accessibility": 0.01,   # Composite: credit depth, account access, bank branches
-
-    # --- Cost Structure (13%) ---
-    "corporate_tax_rate":      0.01,   # Statutory CIT rate %; INVERTED (lower = better)
-    "labor_cost_index":        0.05,   # Index vs US=100; INVERTED (lower = better)
-    "real_estate_cost_index":  0.07,   # USD/sqm prime retail; INVERTED (lower = better)
-
-    # --- Demand Indicators (22%) ---
-    "youth_population_pct":    0.08,   # % population aged 15–64 (World Bank)
-    "middle_class_pct":        0.07,   # % population middle class — primary demand signal
-    "avg_gym_spend_pct_gdp":   0.07,   # (Current Dues×12) ÷ GDP per Capita — affordability
+    "rule_of_law":             0.01,   # World Bank WGI RL.EST (−2.5 to +2.5)
+    "inflation_rate":          0.01,   # Annual CPI %; INVERTED (lower = better score)
+    "currency_volatility":     0.0025, # 3yr std dev of % chg in USD rate; INVERTED
+    "financing_accessibility": 0.0025, # Composite: credit depth, account access, bank branches
 }
-# sum = 1.0000 exactly: 17+13+2+20+4+2+1+2+1+2+1+1+5+7+8+7+7 = 100 ✓
+# sum = 1.0000 exactly: 20+15+25+0.25+4+10+6+0.25+8+4+3+1+1+1+1+0.5+0.5 = 100 ✓
 
 # -----------------------------------------------------------------------------
 # INVERTED VARIABLES
@@ -62,29 +62,29 @@ VARIABLE_CATEGORIES = {
     "market_opportunity": [
         "opportunity_usd_m",
         "potential_market_size",
-        "gym_membership_cagr",
     ],
     "penetration_headroom": [
         "penetration_headroom",
         "concentration",
     ],
+    "demand_indicators": [
+        "gym_membership_cagr",
+        "middle_class_pct",
+        "avg_gym_spend_pct_gdp",
+        "youth_population_pct",
+    ],
+    "cost_structure": [
+        "real_estate_cost_index",
+        "labor_cost_index",
+        "corporate_tax_rate",
+    ],
     "operational_risk": [
         "ease_of_doing_business",
         "political_stability",
+        "rule_of_law",
         "inflation_rate",
         "currency_volatility",
-        "rule_of_law",
         "financing_accessibility",
-    ],
-    "cost_structure": [
-        "corporate_tax_rate",
-        "labor_cost_index",
-        "real_estate_cost_index",
-    ],
-    "demand_indicators": [
-        "youth_population_pct",
-        "middle_class_pct",
-        "avg_gym_spend_pct_gdp",
     ],
 }
 
@@ -95,23 +95,26 @@ VARIABLE_CATEGORIES = {
 # -----------------------------------------------------------------------------
 
 # Rule 1: If gym_membership_cagr is missing
-# cagr weight (0.02) redistributed proportionally to opportunity_usd_m and potential_market_size.
-# base opp+pms = 0.30; opp_override = 0.17 + 0.02×(0.17/0.30) ≈ 0.1813
-#                        pms_override = 0.13 + 0.02×(0.13/0.30) ≈ 0.1387
+# cagr weight (0.04) redistributed proportionally within Demand Indicators.
+# remaining demand = middle_class_pct(0.10) + avg_gym_spend(0.06) + youth(0.0025) = 0.1625
+# middle_override   = 0.10   + 0.04 × (0.10   / 0.1625) ≈ 0.1246
+# avg_spend_override = 0.06  + 0.04 × (0.06   / 0.1625) ≈ 0.0748
+# youth_override    = 0.0025 + 0.04 × (0.0025 / 0.1625) ≈ 0.0031   (sum = 0.2025 ✓)
 RULE1_MISSING_CAGR = {
     "zero_out": "gym_membership_cagr",
     "override": {
-        "opportunity_usd_m":     0.1813,
-        "potential_market_size": 0.1387,
+        "middle_class_pct":      0.1246,
+        "avg_gym_spend_pct_gdp": 0.0748,
+        "youth_population_pct":  0.0031,
     },
 }
 
 # Rule 2: If concentration is missing
-# concentration weight (0.04) added to penetration_headroom: 0.20 + 0.04 = 0.24
+# concentration token weight (0.0025) added to penetration_headroom: 0.25 + 0.0025 = 0.2525
 RULE2_MISSING_CONCENTRATION = {
     "zero_out": "concentration",
     "override": {
-        "penetration_headroom": 0.24,
+        "penetration_headroom": 0.2525,
     },
 }
 
@@ -187,29 +190,26 @@ DUES_INCREASE_PCT = {
 # Add new countries here when expanding via CSV.
 # -----------------------------------------------------------------------------
 COUNTRY_ISO3_MAP = {
-    "Austria":      "AUT",
-    "Belgium":      "BEL",
-    "France":       "FRA",
-    "Germany":      "DEU",
-    "Netherlands":  "NLD",
-    "Portugal":     "PRT",
-    "Switzerland":  "CHE",
-    "Turkiye":      "TUR",
-    "Turkey":       "TUR",
-    "UK":           "GBR",
+    "Austria":        "AUT",
+    "Belgium":        "BEL",
+    "Brazil":         "BRA",
+    "Chile":          "CHL",
+    "Colombia":       "COL",
+    "France":         "FRA",
+    "Germany":        "DEU",
+    "India":          "IND",
+    "Indonesia":      "IDN",
+    "Italy":          "ITA",
+    "Japan":          "JPN",
+    "Netherlands":    "NLD",
+    "Philippines":    "PHL",
+    "Poland":         "POL",
+    "Portugal":       "PRT",
+    "South Korea":    "KOR",
+    "Switzerland":    "CHE",
+    "Thailand":       "THA",
+    "Turkiye":        "TUR",
     "United Kingdom": "GBR",
-    "Italy":        "ITA",
-    "Poland":       "POL",
-    "Brazil":       "BRA",
-    "Chile":        "CHL",
-    "Colombia":     "COL",
-    "India":        "IND",
-    "South Korea":  "KOR",
-    "Korea":        "KOR",
-    "Indonesia":    "IDN",
-    "Thailand":     "THA",
-    "Philippines":  "PHL",
-    "Japan":        "JPN",
     # Add new countries below:
     # "Vietnam": "VNM",
 }
@@ -286,28 +286,27 @@ TRADING_ECONOMICS_API_KEY = ""
 # -----------------------------------------------------------------------------
 OECD_COUNTRY_CODES = {
     # OECD members
-    "Austria":      "AUT",
-    "Belgium":      "BEL",
-    "France":       "FRA",
-    "Germany":      "DEU",
-    "Netherlands":  "NLD",
-    "Portugal":     "PRT",
-    "Switzerland":  "CHE",
-    "Turkiye":      "TUR",
-    "Turkey":       "TUR",
-    "UK":           "GBR",
-    "Italy":        "ITA",
-    "Poland":       "POL",
-    "Japan":        "JPN",
-    "South Korea":  "KOR",
-    "Chile":        "CHL",
-    "Colombia":     "COL",
+    "Austria":        "AUT",
+    "Belgium":        "BEL",
+    "Chile":          "CHL",
+    "Colombia":       "COL",
+    "France":         "FRA",
+    "Germany":        "DEU",
+    "Italy":          "ITA",
+    "Japan":          "JPN",
+    "Netherlands":    "NLD",
+    "Poland":         "POL",
+    "Portugal":       "PRT",
+    "South Korea":    "KOR",
+    "Switzerland":    "CHE",
+    "Turkiye":        "TUR",
+    "United Kingdom": "GBR",
     # Non-OECD members — OECD API returns no data → YAML fallback:
-    "Brazil":       None,
-    "India":        None,
-    "Indonesia":    None,
-    "Thailand":     None,
-    "Philippines":  None,
+    "Brazil":         None,
+    "India":          None,
+    "Indonesia":      None,
+    "Philippines":    None,
+    "Thailand":       None,
 }
 
 # -----------------------------------------------------------------------------
@@ -318,27 +317,26 @@ IMF_INDICATORS = {
 }
 
 IMF_COUNTRY_CODES = {
-    "Austria":      "AUT",
-    "Belgium":      "BEL",
-    "France":       "FRA",
-    "Germany":      "DEU",
-    "Netherlands":  "NLD",
-    "Portugal":     "PRT",
-    "Switzerland":  "CHE",
-    "Turkiye":      "TUR",
-    "Turkey":       "TUR",
-    "UK":           "GBR",
-    "Italy":        "ITA",
-    "Poland":       "POL",
-    "Brazil":       "BRA",
-    "Chile":        "CHL",
-    "Colombia":     "COL",
-    "India":        "IND",
-    "South Korea":  "KOR",
-    "Indonesia":    "IDN",
-    "Thailand":     "THA",
-    "Philippines":  "PHL",
-    "Japan":        "JPN",
+    "Austria":        "AUT",
+    "Belgium":        "BEL",
+    "Brazil":         "BRA",
+    "Chile":          "CHL",
+    "Colombia":       "COL",
+    "France":         "FRA",
+    "Germany":        "DEU",
+    "India":          "IND",
+    "Indonesia":      "IDN",
+    "Italy":          "ITA",
+    "Japan":          "JPN",
+    "Netherlands":    "NLD",
+    "Philippines":    "PHL",
+    "Poland":         "POL",
+    "Portugal":       "PRT",
+    "South Korea":    "KOR",
+    "Switzerland":    "CHE",
+    "Thailand":       "THA",
+    "Turkiye":        "TUR",
+    "United Kingdom": "GBR",
 }
 
 # -----------------------------------------------------------------------------
