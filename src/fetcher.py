@@ -34,14 +34,15 @@ Performance
   backoff (2 s, 4 s, 8 s) before giving up and returning NaN for a value.
 """
 
-import json
 import logging
 import time
-from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
 import requests
+
+from src.utils.cache_manager import CacheManager
+from src.utils.country_normalization import normalize_country_name
 
 logger = logging.getLogger(__name__)
 
@@ -55,8 +56,15 @@ _MAX_RETRIES   = 3      # number of retry attempts after first failure
 
 
 # ---------------------------------------------------------------------------
-# Cache helpers
+# Cache helpers (per-indicator OECD caches — not the unified WB cache)
 # ---------------------------------------------------------------------------
+# The unified external_data_cache.json is managed by CacheManager.
+# These helpers serve only the per-country OECD endpoint caches which
+# are implementation-level artifacts of the OECD single-country API.
+
+import json
+from datetime import datetime, timezone
+
 
 def _cache_path(cache_dir: Path, key: str) -> Path:
     safe = key.replace("/", "_").replace(".", "_").replace(" ", "_")
@@ -459,15 +467,8 @@ def _normalize_oecd_ahr_to_index(raw_ahr: dict) -> dict:
 # Trading Economics — Corporate Tax Rate
 # ---------------------------------------------------------------------------
 
-_TE_COUNTRY_NAME_MAP = {
-    # TE name → our internal country name
-    # "United Kingdom" removed — TE name and internal name now match
-    "Korea, South":    "South Korea",
-    "Turkey":          "Turkiye",
-    "Korea":           "South Korea",
-    "Czech Republic":  "Czech Republic",
-    "Slovak Republic": "Slovakia",
-}
+# TE country name mapping is handled by normalize_country_name() from
+# src.utils.country_normalization — no separate map needed here.
 
 
 def _fetch_te_corporate_tax(session, cache_dir, ttl_hours, no_cache, api_key: str) -> dict:
@@ -494,7 +495,7 @@ def _fetch_te_corporate_tax(session, cache_dir, ttl_hours, no_cache, api_key: st
         result = {}
         for rec in records:
             te_name = rec.get("Country", "")
-            our_name = _TE_COUNTRY_NAME_MAP.get(te_name, te_name)
+            our_name = normalize_country_name(te_name)
             val = rec.get("LatestValue")
             if val is not None:
                 try:
@@ -543,13 +544,9 @@ def fetch_all_external_data(
     cache_path.mkdir(exist_ok=True)
 
     # ── Unified cache: skip all API calls when data is still fresh ────────────
-    unified_cache_file = cache_path / "external_data_cache.json"
-    if not no_cache and _cache_valid(unified_cache_file, ttl_hours):
-        logger.info(
-            "External data loaded from cache (age < %.0fh). Skipping API calls.",
-            ttl_hours,
-        )
-        return _read_cache(unified_cache_file)
+    cm = CacheManager(cache_dir=str(cache_path), force_refresh=no_cache, ttl_hours=ttl_hours)
+    if cm.is_valid():
+        return cm.load()
 
     logger.info("Fetching fresh external data for %d countries...", len(countries))
 
@@ -580,18 +577,28 @@ def fetch_all_external_data(
     # wb_series_key is used to store results in wb_data[indicator_code][iso3]
     # and is logged for progress visibility.
     _WB_BATCH_PLAN = [
-        ("govt_effectiveness",  wb_indicators["govt_effectiveness"],   5),
-        ("political_stability", wb_indicators["political_stability"],  5),
-        ("rule_of_law",         wb_indicators["rule_of_law"],          5),
-        ("inflation_rate",      wb_indicators["inflation_rate"],       5),
-        ("usd_exchange_rate",   wb_indicators["usd_exchange_rate"],   10),
-        ("youth_population",    "SP.POP.1564.TO.ZS",                  5),
-        ("gdp_growth",          "NY.GDP.MKTP.KD.ZG",                  7),  # GDP growth % — CAGR proxy
-        ("fin_domestic_credit", _FINANCING_INDICATORS["domestic_credit"],   10),
-        ("fin_account_ownership", _FINANCING_INDICATORS["account_ownership"], 10),
-        ("fin_bank_branches",   _FINANCING_INDICATORS["bank_branches"],      10),
-        ("mc_q3",               _MIDDLE_CLASS_INDICATORS["q3"],       10),
-        ("mc_q4",               _MIDDLE_CLASS_INDICATORS["q4"],       10),
+        # Primary indicators
+        ("govt_effectiveness",    wb_indicators["govt_effectiveness"],  5),
+        ("political_stability",   wb_indicators["political_stability"], 5),
+        ("rule_of_law",           wb_indicators["rule_of_law"],         5),
+        ("inflation_rate",        wb_indicators["inflation_rate"],      5),
+        ("usd_exchange_rate",     wb_indicators["usd_exchange_rate"],  10),
+        ("youth_population",      "SP.POP.1564.TO.ZS",                 5),
+        ("gdp_growth",            "NY.GDP.MKTP.KD.ZG",                 7),  # GDP growth % — CAGR proxy
+        ("fin_domestic_credit",   _FINANCING_INDICATORS["domestic_credit"],    10),
+        ("fin_account_ownership", _FINANCING_INDICATORS["account_ownership"],  10),
+        ("fin_bank_branches",     _FINANCING_INDICATORS["bank_branches"],      10),
+        ("mc_q3",                 _MIDDLE_CLASS_INDICATORS["q3"],      10),
+        ("mc_q4",                 _MIDDLE_CLASS_INDICATORS["q4"],      10),
+        # Secondary / tertiary fallback indicators
+        ("regulatory_quality",    "RQ.EST",               5),   # secondary for ease_of_doing_business
+        ("voice_accountability",  "VA.EST",               5),   # secondary for political_stability
+        ("ctrl_of_corruption",    "CC.EST",               5),   # secondary for rule_of_law
+        ("gdp_deflator",          "NY.GDP.DEFL.KD.ZG",   5),   # secondary for inflation_rate
+        ("alt_fx_rate",           "PA.NUS.ATLS",         10),   # secondary for currency_volatility
+        ("pop_0_14",              "SP.POP.0014.TO.ZS",   5),    # secondary for youth_population_pct
+        ("pop_65_plus",           "SP.POP.65UP.TO.ZS",   5),    # tertiary for youth_population_pct
+        ("gini",                  "SI.POV.GINI",         10),   # secondary for middle_class_pct
     ]
 
     # wb_data[indicator_code][iso3] = [{date, value}, ...]
@@ -621,35 +628,141 @@ def fetch_all_external_data(
         def _get_series(indicator: str):
             return wb_data.get(indicator, {}).get(iso3)
 
-        # Institutional / macro (latest scalar value)
-        d["ease_of_doing_business"] = _latest_value(
-            _get_series(wb_indicators["govt_effectiveness"])
-        )
-        d["political_stability"] = _latest_value(
-            _get_series(wb_indicators["political_stability"])
-        )
-        d["rule_of_law"] = _latest_value(
-            _get_series(wb_indicators["rule_of_law"])
-        )
-        d["inflation_rate"] = _latest_value(
-            _get_series(wb_indicators["inflation_rate"])
-        )
+        # ── ease_of_doing_business ────────────────────────────────────────
+        # Primary: GE.EST (Government Effectiveness)
+        # Secondary: RQ.EST (Regulatory Quality)
+        # Both available → average (combined governance score, same WGI scale)
+        ge = _latest_value(_get_series(wb_indicators["govt_effectiveness"]))
+        rq = _latest_value(_get_series("RQ.EST"))
+        if ge is not None and rq is not None:
+            d["ease_of_doing_business"] = round((ge + rq) / 2, 4)
+            d["_eodb_data_tier"] = "primary+secondary_avg"
+        elif ge is not None:
+            d["ease_of_doing_business"] = ge
+            d["_eodb_data_tier"] = "primary"
+        elif rq is not None:
+            d["ease_of_doing_business"] = rq
+            d["_eodb_data_tier"] = "secondary"
+            logger.info("%s / ease_of_doing_business: using RQ.EST fallback.", country)
+        else:
+            d["ease_of_doing_business"] = None
+            d["_eodb_data_tier"] = "missing"
 
-        # Currency volatility from exchange-rate time series
+        # ── political_stability ───────────────────────────────────────────
+        # Primary: PV.EST  Secondary: VA.EST (Voice & Accountability — same WGI scale)
+        pv = _latest_value(_get_series(wb_indicators["political_stability"]))
+        va = _latest_value(_get_series("VA.EST"))
+        if pv is not None:
+            d["political_stability"] = pv
+            d["_pol_stab_data_tier"] = "primary"
+        elif va is not None:
+            d["political_stability"] = va
+            d["_pol_stab_data_tier"] = "secondary"
+            logger.info("%s / political_stability: using VA.EST fallback.", country)
+        else:
+            d["political_stability"] = None
+            d["_pol_stab_data_tier"] = "missing"
+
+        # ── rule_of_law ───────────────────────────────────────────────────
+        # Primary: RL.EST  Secondary: CC.EST (Control of Corruption — same WGI scale)
+        rl = _latest_value(_get_series(wb_indicators["rule_of_law"]))
+        cc = _latest_value(_get_series("CC.EST"))
+        if rl is not None:
+            d["rule_of_law"] = rl
+            d["_rl_data_tier"] = "primary"
+        elif cc is not None:
+            d["rule_of_law"] = cc
+            d["_rl_data_tier"] = "secondary"
+            logger.info("%s / rule_of_law: using CC.EST (Control of Corruption) fallback.", country)
+        else:
+            d["rule_of_law"] = None
+            d["_rl_data_tier"] = "missing"
+
+        # ── inflation_rate ────────────────────────────────────────────────
+        # Primary: FP.CPI.TOTL.ZG (CPI %)  Secondary: NY.GDP.DEFL.KD.ZG (GDP deflator %)
+        cpi      = _latest_value(_get_series(wb_indicators["inflation_rate"]))
+        deflator = _latest_value(_get_series("NY.GDP.DEFL.KD.ZG"))
+        if cpi is not None:
+            d["inflation_rate"] = cpi
+            d["_inflation_data_tier"] = "primary"
+        elif deflator is not None:
+            d["inflation_rate"] = deflator
+            d["_inflation_data_tier"] = "secondary"
+            logger.info("%s / inflation_rate: using GDP deflator fallback.", country)
+        else:
+            d["inflation_rate"] = None
+            d["_inflation_data_tier"] = "missing"
+
+        # ── currency_volatility ───────────────────────────────────────────
+        # Primary: CoV of PA.NUS.FCRF  Secondary: CoV of PA.NUS.ATLS
+        # CoV is scale-invariant so both rate series are valid inputs.
         fx_series = _get_series(wb_indicators["usd_exchange_rate"])
-        d["currency_volatility"] = _coefficient_of_variation(fx_series)
+        cv = _coefficient_of_variation(fx_series)
+        if cv is not None:
+            d["currency_volatility"] = cv
+            d["_fx_data_tier"] = "primary"
+        else:
+            alt_fx = _get_series("PA.NUS.ATLS")
+            cv_alt = _coefficient_of_variation(alt_fx)
+            if cv_alt is not None:
+                d["currency_volatility"] = cv_alt
+                d["_fx_data_tier"] = "secondary"
+                logger.info("%s / currency_volatility: using Atlas FX rate fallback.", country)
+            else:
+                d["currency_volatility"] = None
+                d["_fx_data_tier"] = "missing"
 
-        # Youth population %
+        # ── youth_population_pct ──────────────────────────────────────────
+        # Primary: SP.POP.1564.TO.ZS (working-age %, 15–64)
+        # Secondary: 100 − pop_0_14% − pop_65plus% (complement derivation)
+        # Tertiary: 100 − pop_0_14% only (if 65+ unavailable)
         val = _latest_value(_get_series("SP.POP.1564.TO.ZS"))
-        d["youth_population_pct"] = round(val, 4) if val is not None else None
+        if val is not None:
+            d["youth_population_pct"] = round(val, 4)
+            d["_youth_data_tier"] = "primary"
+        else:
+            p014 = _latest_value(_get_series("SP.POP.0014.TO.ZS"))
+            p65p = _latest_value(_get_series("SP.POP.65UP.TO.ZS"))
+            if p014 is not None and p65p is not None:
+                derived = round(100.0 - p014 - p65p, 4)
+                d["youth_population_pct"] = derived
+                d["_youth_data_tier"] = "secondary_derived"
+                logger.info(
+                    "%s / youth_population_pct: derived complement %.1f%%.", country, derived
+                )
+            elif p014 is not None:
+                d["youth_population_pct"] = round(100.0 - p014, 4)
+                d["_youth_data_tier"] = "tertiary_partial"
+                logger.info(
+                    "%s / youth_population_pct: partial complement (only 0–14 available).", country
+                )
+            else:
+                d["youth_population_pct"] = None
+                d["_youth_data_tier"] = "missing"
 
-        # Middle class: sum of Q3 + Q4 income shares
+        # ── middle_class_pct ──────────────────────────────────────────────
+        # Primary: Q3 + Q4 income quintile shares (natural range ~30–45)
+        # Secondary: Gini-based estimate = (100 − Gini) × 0.40  (same ~30–40 range)
+        # Bounds [20, 60] applied to all paths to prevent unrealistic estimates.
         q3 = _latest_value(_get_series(_MIDDLE_CLASS_INDICATORS["q3"]))
         q4 = _latest_value(_get_series(_MIDDLE_CLASS_INDICATORS["q4"]))
         if q3 is not None or q4 is not None:
-            d["middle_class_pct"] = round((q3 or 0.0) + (q4 or 0.0), 4)
+            raw_mc = (q3 or 0.0) + (q4 or 0.0)
+            d["middle_class_pct"] = round(min(max(raw_mc, 20.0), 60.0), 4)
+            d["_mc_data_tier"] = "primary" if (q3 is not None and q4 is not None) else "primary_partial"
         else:
-            d["middle_class_pct"] = None
+            gini = _latest_value(_get_series("SI.POV.GINI"))
+            if gini is not None:
+                raw_mc = (100.0 - gini) * 0.40
+                d["middle_class_pct"] = round(min(max(raw_mc, 20.0), 60.0), 4)
+                d["_mc_data_tier"] = "secondary_gini"
+                logger.info(
+                    "%s / middle_class_pct: Gini-based estimate %.1f%%.",
+                    country, d["middle_class_pct"],
+                )
+            else:
+                d["middle_class_pct"] = None
+                d["_mc_data_tier"] = "missing"
 
         # GDP growth rate — 5-year average used as gym membership CAGR proxy
         gdp_growth_series = _get_series("NY.GDP.MKTP.KD.ZG")
@@ -713,9 +826,8 @@ def fetch_all_external_data(
             result[country]["labor_cost_index"] = val
 
     # ── Save unified cache so subsequent runs skip all API calls ──────────────
-    _write_cache(unified_cache_file, result)
+    cm.save(result)
     logger.info(
-        "External data fetch complete for %d countries. Cache saved to %s",
-        len(countries), unified_cache_file,
+        "External data fetch complete for %d countries.", len(countries)
     )
     return result

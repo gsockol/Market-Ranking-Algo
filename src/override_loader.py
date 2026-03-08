@@ -22,6 +22,8 @@ import numpy as np
 import pandas as pd
 import yaml
 
+from src.utils.country_normalization import normalize_country_name
+
 logger = logging.getLogger(__name__)
 
 # Variable defaulted to 0 when all data sources return nothing.
@@ -46,7 +48,10 @@ def load_yaml_overrides(yaml_path: str) -> dict:
         return {}
     with open(path, encoding="utf-8") as f:
         doc = yaml.safe_load(f) or {}
-    overrides = doc.get("overrides", {}) or {}
+    raw_overrides = doc.get("overrides", {}) or {}
+    # Normalize country name keys so YAML entries like "UK:" or "Korea:"
+    # are silently resolved to their canonical internal names.
+    overrides = {normalize_country_name(k): v for k, v in raw_overrides.items()}
     logger.info(
         "Loaded manual overrides for %d countries from '%s'.", len(overrides), yaml_path
     )

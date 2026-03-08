@@ -105,6 +105,11 @@ def main():
         help="Bypass API cache and re-fetch all external data",
     )
     parser.add_argument(
+        "--refresh-api",
+        action="store_true",
+        help="Bypass API cache and force re-fetch of all external data (alias for --no-cache)",
+    )
+    parser.add_argument(
         "--interactive",
         action="store_true",
         help="Prompt interactively for any missing data not covered by YAML overrides",
@@ -160,7 +165,7 @@ def main():
             te_api_key=cfg.TRADING_ECONOMICS_API_KEY,
             cache_dir=cfg.CACHE_DIR,
             ttl_hours=cfg.CACHE_EXPIRY_HOURS,
-            no_cache=args.no_cache,
+            no_cache=args.no_cache or args.refresh_api,
         )
 
     # ------------------------------------------------------------------
