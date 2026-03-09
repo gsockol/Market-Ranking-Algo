@@ -59,6 +59,67 @@ def load_yaml_overrides(yaml_path: str) -> dict:
     return overrides
 
 
+def load_yaml_penetration_overrides(yaml_path: str) -> dict:
+    """
+    Read the ``penetration_overrides`` section from the YAML override file.
+
+    Returns
+    -------
+    dict  {country_name: fraction}  — only countries where
+          • penetration_overrides.enabled == true, AND
+          • the per-country value is not null, AND
+          • the value passes range validation (0 < v ≤ 1).
+    Returns an empty dict when the section is absent or enabled == false.
+
+    Values outside (0, 1] but inside (0, 100] are silently converted from
+    a percentage to a fraction (e.g. 20.0 → 0.20).
+    """
+    path = Path(yaml_path)
+    if not path.exists():
+        return {}
+    with open(path, encoding="utf-8") as f:
+        doc = yaml.safe_load(f) or {}
+
+    pen_section = doc.get("penetration_overrides", {}) or {}
+    if not pen_section.get("enabled", False):
+        return {}
+
+    raw_values = pen_section.get("values", {}) or {}
+    result = {}
+    for country_raw, val in raw_values.items():
+        if val is None:
+            continue
+        country = normalize_country_name(country_raw)
+        try:
+            v = float(val)
+        except (TypeError, ValueError):
+            logger.warning(
+                "penetration_overrides: '%s' value '%s' is not numeric — skipped.",
+                country_raw, val,
+            )
+            continue
+
+        # Auto-convert percentage input to fraction
+        if 1.0 < v <= 100.0:
+            v = round(v / 100.0, 6)
+
+        if not (0.0 < v <= 1.0):
+            logger.warning(
+                "penetration_overrides: '%s' value %.4f out of range (0, 1] — skipped.",
+                country, v,
+            )
+            continue
+        result[country] = v
+
+    if result:
+        logger.info(
+            "YAML penetration overrides loaded for %d countries: %s",
+            len(result),
+            ", ".join(f"{c}={v:.1%}" for c, v in result.items()),
+        )
+    return result
+
+
 def _prompt_value(country: str, variable: str) -> float | None:
     """
     Ask the user to type a numeric value for one variable.

@@ -36,6 +36,46 @@
 #                              and bank branches per 100k adults (WB 2022).
 # =============================================================================
 
+# =============================================================================
+# PENETRATION OVERRIDES
+# =============================================================================
+# Override the future gym penetration rate assumption for specific countries.
+# Set enabled: true to activate this section; individual null values keep the
+# CSV default.  Values are fractions (e.g. 0.20 = 20%).
+#
+# These override the "Future_Penetration" column in input_data.csv.
+# Values are applied BEFORE derived metrics (headroom, TAM, opportunity) are
+# computed — so changing them here changes the entire market-size calculation.
+#
+# Validation rules applied at load time:
+#   • Must be a number in range (0, 1] — fractions only (not percentages)
+#   • Must be > current_penetration_pct for the country or the override is
+#     silently ignored (logged as a warning)
+# =============================================================================
+penetration_overrides:
+  enabled: false   # set to true to activate custom penetration assumptions
+  values:
+    Austria:        null   # default: 0.14 (CSV)
+    Belgium:        null   # default: 0.17 (CSV)
+    Brazil:         null   # default: 0.20 (CSV — updated Session 2)
+    Chile:          null   # default: 0.12 (CSV)
+    Colombia:       null   # default: 0.10 (CSV)
+    France:         null   # default: 0.15 (CSV)
+    Germany:        null   # default: 0.17 (CSV)
+    India:          null   # default: 0.08 (CSV)
+    Indonesia:      null   # default: 0.05 (CSV)
+    Italy:          null   # default: 0.12 (CSV)
+    Japan:          null   # default: 0.08 (CSV)
+    Netherlands:    null   # default: 0.18 (CSV)
+    Philippines:    null   # default: 0.04 (CSV)
+    Poland:         null   # default: 0.12 (CSV)
+    Portugal:       null   # default: 0.12 (CSV)
+    South Korea:    null   # default: 0.12 (CSV)
+    Switzerland:    null   # default: 0.18 (CSV)
+    Thailand:       null   # default: 0.08 (CSV)
+    Turkiye:        null   # default: 0.10 (CSV)
+    United Kingdom: null   # default: 0.15 (CSV)
+
 overrides:
   Austria:
     corporate_tax_rate: 23.0
