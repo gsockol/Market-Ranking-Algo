@@ -5,6 +5,16 @@
 # Do NOT edit core logic files (scoring.py, data_fetcher.py, etc.).
 # All weights must sum to 1.0.
 # =============================================================================
+#
+# MODEL STATUS: STABLE BASELINE (v1.0)
+# This version passed full verification:
+#   * Brazil ranks Top 5
+#   * Portugal ranking improved
+#   * No zero CAGR values
+#   * Penetration override system active
+#   * Colab execution verified
+# Do NOT modify normalization or weights without creating a new version tag.
+# =============================================================================
 
 import os
 

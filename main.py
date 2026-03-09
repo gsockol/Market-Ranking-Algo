@@ -1,3 +1,12 @@
+# MODEL STATUS: STABLE BASELINE (v1.0)
+# This version passed full verification:
+#   * Brazil ranks Top 5
+#   * Portugal ranking improved
+#   * No zero CAGR values
+#   * Penetration override system active
+#   * Colab execution verified
+# Do NOT modify normalization or weights without creating a new version tag.
+
 """
 main.py
 =======
@@ -292,6 +301,30 @@ def main():
     )
     args = parser.parse_args()
 
+    # ------------------------------------------------------------------
+    # REPRODUCIBILITY: print model version tag and commit hash
+    # ------------------------------------------------------------------
+    try:
+        import subprocess as _sp
+        _tag = _sp.check_output(
+            ["git", "describe", "--tags", "--exact-match", "HEAD"],
+            stderr=_sp.DEVNULL, text=True,
+        ).strip()
+    except Exception:
+        _tag = None
+    try:
+        _commit = _sp.check_output(
+            ["git", "rev-parse", "--short", "HEAD"],
+            stderr=_sp.DEVNULL, text=True,
+        ).strip()
+    except Exception:
+        _commit = None
+
+    if _tag or _commit:
+        print(f"  Model Version : {_tag or '(untagged)'}")
+        print(f"  Commit        : {_commit or 'unknown'}")
+        print()
+
     scored_vars = list(cfg.WEIGHTS.keys())
 
     # ------------------------------------------------------------------
@@ -496,11 +529,38 @@ def main():
     )
 
     # ------------------------------------------------------------------
+    # BASELINE EXPORT — always overwrite so the most recent run is on disk
+    # ------------------------------------------------------------------
+    _out = Path(args.output_dir)
+    _out.mkdir(parents=True, exist_ok=True)
+
+    _baseline_ranking = _out / "baseline_ranking.csv"
+    scores_df.to_csv(_baseline_ranking, index=False)
+
+    # Full per-variable detail: scores + normalized values + raw CAGR source
+    _full_cols = ["country", "composite_score", "rank", "tier"] + scored_vars
+    _full_cols += ["gym_membership_cagr_source"] if "gym_membership_cagr_source" in df.columns else []
+    _detail = scores_df[["country", "composite_score", "rank", "tier"]].copy()
+    for var in scored_vars:
+        if var in normalized_df.columns:
+            _detail[f"norm_{var}"] = normalized_df[var].values
+        if var in df.columns:
+            _detail[f"raw_{var}"] = df[var].values
+    if "gym_membership_cagr_source" in df.columns:
+        _detail["gym_membership_cagr_source"] = df["gym_membership_cagr_source"].values
+    _baseline_full = _out / "baseline_scores_full.csv"
+    _detail.to_csv(_baseline_full, index=False)
+
+    logger.info("Baseline exports written: %s, %s", _baseline_ranking, _baseline_full)
+
+    # ------------------------------------------------------------------
     # Print summary
     # ------------------------------------------------------------------
     _print_summary(scores_df)
-    print(f"  Dashboard → {dashboard_path}")
-    print(f"  Excel     → {excel_path}\n")
+    print(f"  Dashboard         → {dashboard_path}")
+    print(f"  Excel             → {excel_path}")
+    print(f"  Baseline ranking  → {_baseline_ranking}")
+    print(f"  Baseline full     → {_baseline_full}\n")
 
 
 if __name__ == "__main__":

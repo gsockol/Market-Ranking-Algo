@@ -1,3 +1,12 @@
+# MODEL STATUS: STABLE BASELINE (v1.0)
+# This version passed full verification:
+#   * Brazil ranks Top 5
+#   * Portugal ranking improved
+#   * No zero CAGR values
+#   * Penetration override system active
+#   * Colab execution verified
+# Do NOT modify normalization or weights without creating a new version tag.
+
 """
 src/calculator.py
 =================
