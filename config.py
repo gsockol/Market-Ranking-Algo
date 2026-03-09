@@ -6,6 +6,8 @@
 # All weights must sum to 1.0.
 # =============================================================================
 
+import os
+
 # -----------------------------------------------------------------------------
 # SCORING WEIGHTS
 # Each key maps to a scored variable. Values must sum to exactly 1.0.
@@ -280,7 +282,7 @@ USA_BASELINE = {
 # Leave blank ("") to use YAML fallback for corporate_tax_rate.
 # Sign up at https://tradingeconomics.com/api/ for a free or paid key.
 # -----------------------------------------------------------------------------
-TRADING_ECONOMICS_API_KEY = ""
+TRADING_ECONOMICS_API_KEY = os.environ.get("TRADING_ECONOMICS_API_KEY", "")
 
 # -----------------------------------------------------------------------------
 # OECD COUNTRY CODES FOR stats.oecd.org API
