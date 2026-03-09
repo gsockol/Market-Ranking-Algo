@@ -21,30 +21,51 @@ Trading Economics API
     Falls back to YAML when key is empty or API call fails.
 
 Priority: API value → YAML override (handled in override_loader.py)
+
+Performance
+-----------
+• All WB indicators are fetched in a single batched API call per indicator
+  (all countries at once) instead of one call per country.  This cuts WB
+  API calls from N_countries × N_indicators down to N_indicators only.
+• A unified cache file (cache/external_data_cache.json) stores the complete
+  result dict.  On subsequent runs within the TTL window the file is loaded
+  directly — zero API calls.
+• HTTP requests use a 60-second timeout and up to 3 retries with exponential
+  backoff (2 s, 4 s, 8 s) before giving up and returning NaN for a value.
 """
 
-import json
 import logging
 import time
-from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
 import requests
 
+from src.utils.cache_manager import CacheManager
+from src.utils.country_normalization import normalize_country_name
+
 logger = logging.getLogger(__name__)
 
-_WB_BASE  = "https://api.worldbank.org/v2"
-_TE_BASE  = "https://api.tradingeconomics.com"
+_WB_BASE   = "https://api.worldbank.org/v2"
+_TE_BASE   = "https://api.tradingeconomics.com"
 _OECD_BASE = "https://stats.oecd.org/SDMX-JSON/data"
+_IMF_BASE  = "https://www.imf.org/external/datamapper/api/v1"
 
 _REQUEST_DELAY = 0.25   # seconds — polite rate limiting between calls
-_TIMEOUT = 20           # seconds per HTTP request
+_TIMEOUT       = 30     # seconds per HTTP request
+_MAX_RETRIES   = 3      # number of retry attempts after first failure
 
 
 # ---------------------------------------------------------------------------
-# Cache helpers
+# Cache helpers (per-indicator OECD caches — not the unified WB cache)
 # ---------------------------------------------------------------------------
+# The unified external_data_cache.json is managed by CacheManager.
+# These helpers serve only the per-country OECD endpoint caches which
+# are implementation-level artifacts of the OECD single-country API.
+
+import json
+from datetime import datetime, timezone
+
 
 def _cache_path(cache_dir: Path, key: str) -> Path:
     safe = key.replace("/", "_").replace(".", "_").replace(" ", "_")
@@ -69,15 +90,101 @@ def _write_cache(path: Path, data):
 
 
 # ---------------------------------------------------------------------------
+# HTTP helper with retry + exponential backoff
+# ---------------------------------------------------------------------------
+
+def _http_get_with_retry(
+    session: requests.Session,
+    url: str,
+    params: dict,
+    timeout: int = _TIMEOUT,
+    max_retries: int = _MAX_RETRIES,
+) -> requests.Response:
+    """
+    GET *url* with retry on timeout or connection errors.
+
+    Waits 2 s → 4 s → 8 s between successive attempts.
+    Raises the final exception if all retries are exhausted.
+    """
+    last_exc = None
+    for attempt in range(max_retries + 1):
+        try:
+            return session.get(url, params=params, timeout=timeout)
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as exc:
+            last_exc = exc
+            if attempt < max_retries:
+                wait = 2 ** (attempt + 1)   # 2, 4, 8
+                logger.warning(
+                    "HTTP timeout/error (attempt %d/%d), retrying in %ds: %s",
+                    attempt + 1, max_retries + 1, wait, exc,
+                )
+                time.sleep(wait)
+    raise last_exc
+
+
+# ---------------------------------------------------------------------------
 # World Bank helpers
 # ---------------------------------------------------------------------------
 
+def _wb_batch_get(
+    session: requests.Session,
+    iso3_list: list,
+    indicator: str,
+    mrv: int = 10,
+) -> dict:
+    """
+    Fetch *indicator* for **all** countries in *iso3_list* in a single WB
+    API call using the semicolon-separated multi-country endpoint.
+
+    Returns
+    -------
+    dict
+        {iso3: [{date, value}, ...]} — newest records first per country.
+        Returns an empty dict on any error (caller treats missing as None).
+    """
+    if not iso3_list:
+        return {}
+
+    country_str = ";".join(iso3_list)
+    url = f"{_WB_BASE}/country/{country_str}/indicator/{indicator}"
+    # per_page must cover all countries × mrv years; 500 is a safe ceiling
+    per_page = max(500, len(iso3_list) * mrv + 10)
+    params = {"format": "json", "mrv": mrv, "per_page": per_page}
+
+    try:
+        resp = _http_get_with_retry(session, url, params)
+        resp.raise_for_status()
+        payload = resp.json()
+        if not isinstance(payload, list) or len(payload) < 2:
+            return {}
+        result: dict = {}
+        for r in (payload[1] or []):
+            if not isinstance(r, dict):
+                continue
+            iso3 = r.get("countryiso3code", "")
+            if not iso3:
+                continue
+            result.setdefault(iso3, []).append(
+                {"date": r.get("date"), "value": r.get("value")}
+            )
+        return result
+    except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as exc:
+        logger.warning(
+            "WB API batch failed for indicator %s after %d retries: %s",
+            indicator, _MAX_RETRIES, exc,
+        )
+        return {}
+    except Exception as exc:
+        logger.warning("WB API error for indicator %s: %s", indicator, exc)
+        return {}
+
+
 def _wb_get(session: requests.Session, iso3: str, indicator: str, mrv: int = 10):
-    """Fetch a WB indicator series. Returns list of {date, value} dicts or None."""
+    """Single-country WB fetch (kept for compatibility). Returns list of dicts or None."""
     url = f"{_WB_BASE}/country/{iso3}/indicator/{indicator}"
     params = {"format": "json", "mrv": mrv, "per_page": mrv}
     try:
-        resp = session.get(url, params=params, timeout=_TIMEOUT)
+        resp = _http_get_with_retry(session, url, params)
         resp.raise_for_status()
         payload = resp.json()
         if not isinstance(payload, list) or len(payload) < 2:
@@ -146,9 +253,9 @@ def _coefficient_of_variation(series):
 # ---------------------------------------------------------------------------
 
 _FINANCING_INDICATORS = {
-    "domestic_credit":  "FS.AST.PRVT.GD.ZS",
+    "domestic_credit":   "FS.AST.PRVT.GD.ZS",
     "account_ownership": "FX.OWN.TOTL.ZS",
-    "bank_branches":    "FB.CBK.BRCH.P5",
+    "bank_branches":     "FB.CBK.BRCH.P5",
 }
 
 
@@ -251,7 +358,7 @@ def _oecd_sdmx_get(session: requests.Session, dataset: str, filter_str: str,
         "endTime": str(end),
     }
     try:
-        resp = session.get(url, params=params, timeout=_TIMEOUT)
+        resp = _http_get_with_retry(session, url, params)
         if resp.status_code == 404:
             return None
         resp.raise_for_status()
@@ -361,15 +468,8 @@ def _normalize_oecd_ahr_to_index(raw_ahr: dict) -> dict:
 # Trading Economics — Corporate Tax Rate
 # ---------------------------------------------------------------------------
 
-_TE_COUNTRY_NAME_MAP = {
-    # TE name → our internal country name
-    "United Kingdom":        "UK",
-    "Korea, South":          "South Korea",
-    "Turkey":                "Turkiye",
-    "Korea":                 "South Korea",
-    "Czech Republic":        "Czech Republic",
-    "Slovak Republic":       "Slovakia",
-}
+# TE country name mapping is handled by normalize_country_name() from
+# src.utils.country_normalization — no separate map needed here.
 
 
 def _fetch_te_corporate_tax(session, cache_dir, ttl_hours, no_cache, api_key: str) -> dict:
@@ -387,7 +487,7 @@ def _fetch_te_corporate_tax(session, cache_dir, ttl_hours, no_cache, api_key: st
 
     url = f"{_TE_BASE}/country-list/corporate-tax-rate"
     try:
-        resp = session.get(url, params={"c": api_key, "f": "json"}, timeout=_TIMEOUT)
+        resp = _http_get_with_retry(session, url, {"c": api_key, "f": "json"})
         resp.raise_for_status()
         records = resp.json()
         if not isinstance(records, list):
@@ -396,7 +496,7 @@ def _fetch_te_corporate_tax(session, cache_dir, ttl_hours, no_cache, api_key: st
         result = {}
         for rec in records:
             te_name = rec.get("Country", "")
-            our_name = _TE_COUNTRY_NAME_MAP.get(te_name, te_name)
+            our_name = normalize_country_name(te_name)
             val = rec.get("LatestValue")
             if val is not None:
                 try:
@@ -408,6 +508,127 @@ def _fetch_te_corporate_tax(session, cache_dir, ttl_hours, no_cache, api_key: st
         return result
     except Exception as exc:
         logger.warning("Trading Economics API error: %s — using YAML fallback.", exc)
+        return {}
+
+
+# ---------------------------------------------------------------------------
+# Trading Economics — GDP Growth Rate (primary GDP source)
+# ---------------------------------------------------------------------------
+
+# Map our canonical country names to Trading Economics URL slug format.
+_TE_COUNTRY_SLUGS: dict = {
+    "South Korea":    "south-korea",
+    "United Kingdom": "united-kingdom",
+    "Turkiye":        "turkey",
+    "Philippines":    "philippines",
+}
+
+
+def _country_to_te_slug(country: str) -> str:
+    return _TE_COUNTRY_SLUGS.get(country, country.lower().replace(" ", "-"))
+
+
+def _fetch_te_gdp_growth(
+    session, cache_dir, ttl_hours, no_cache, api_key: str, countries: list
+) -> dict:
+    """
+    Fetch latest real GDP growth rate for all countries from Trading Economics.
+    Returns {country_name: float_pct} or empty dict if key absent / call fails.
+    This is the **primary** source for gdp_cagr_proxy used in gym CAGR derivation.
+    """
+    if not api_key:
+        logger.info(
+            "TRADING_ECONOMICS_API_KEY not set — GDP growth will use IMF/WB fallback."
+        )
+        return {}
+
+    path = _cache_path(cache_dir, "te_gdp_growth_all")
+    if not no_cache and _cache_valid(path, ttl_hours):
+        return _read_cache(path)
+
+    slugs = ",".join(_country_to_te_slug(c) for c in countries)
+    url = f"{_TE_BASE}/country/{slugs}/indicator/gdp-growth-rate"
+    try:
+        resp = _http_get_with_retry(session, url, {"c": api_key, "f": "json"})
+        resp.raise_for_status()
+        records = resp.json()
+        if not isinstance(records, list):
+            logger.warning("TE GDP API: unexpected response format — falling back to IMF.")
+            return {}
+        result: dict = {}
+        for rec in records:
+            te_name = rec.get("Country", "")
+            our_name = normalize_country_name(te_name)
+            val = rec.get("LatestValue")
+            if val is not None:
+                try:
+                    result[our_name] = float(val)
+                except (TypeError, ValueError):
+                    pass
+        _write_cache(path, result)
+        logger.info(
+            "Trading Economics GDP growth: fetched rates for %d countries.", len(result)
+        )
+        return result
+    except Exception as exc:
+        logger.warning(
+            "Trading Economics GDP growth API error: %s — falling back to IMF.", exc
+        )
+        return {}
+
+
+# ---------------------------------------------------------------------------
+# IMF DataMapper — GDP Growth Rate (fallback GDP source)
+# ---------------------------------------------------------------------------
+
+
+def _fetch_imf_gdp_growth(
+    session, cache_dir, ttl_hours, no_cache, imf_country_codes: dict
+) -> dict:
+    """
+    Fetch real GDP growth (NGDP_RPCH) for all countries from IMF DataMapper.
+    Returns {country_name: float_pct} or empty dict on failure.
+    This is the **fallback** source when Trading Economics is unavailable.
+    """
+    path = _cache_path(cache_dir, "imf_gdp_growth_all")
+    if not no_cache and _cache_valid(path, ttl_hours):
+        return _read_cache(path)
+
+    # Build reverse map iso3 → country name
+    code_to_country = {v: k for k, v in imf_country_codes.items() if v}
+    codes = ";".join(v for v in imf_country_codes.values() if v)
+    if not codes:
+        return {}
+
+    url = f"{_IMF_BASE}/NGDP_RPCH/{codes}"
+    try:
+        resp = _http_get_with_retry(session, url, {})
+        resp.raise_for_status()
+        data = resp.json()
+        values = data.get("values", {}).get("NGDP_RPCH", {})
+        result: dict = {}
+        for code, year_data in values.items():
+            country = code_to_country.get(code)
+            if not country or not year_data:
+                continue
+            # Pick most recent year with a non-null value
+            for year in sorted(year_data.keys(), reverse=True):
+                val = year_data[year]
+                if val is not None:
+                    try:
+                        result[country] = float(val)
+                    except (TypeError, ValueError):
+                        pass
+                    break
+        _write_cache(path, result)
+        logger.info(
+            "IMF DataMapper GDP growth: fetched rates for %d countries.", len(result)
+        )
+        return result
+    except Exception as exc:
+        logger.warning(
+            "IMF DataMapper GDP growth API error: %s — falling back to World Bank.", exc
+        )
         return {}
 
 
@@ -424,9 +645,17 @@ def fetch_all_external_data(
     cache_dir: str,
     ttl_hours: float,
     no_cache: bool = False,
+    imf_country_codes: dict | None = None,
 ) -> dict:
     """
     Fetch all external data for every country.
+
+    On the first run data is fetched from APIs and saved to a unified cache
+    file (``cache/external_data_cache.json``).  Subsequent runs within the
+    TTL window load that file directly — **zero API calls**.
+
+    World Bank requests are batched: one API call per indicator covers all
+    countries simultaneously instead of one call per country per indicator.
 
     Returns
     -------
@@ -437,88 +666,312 @@ def fetch_all_external_data(
     cache_path = Path(cache_dir)
     cache_path.mkdir(exist_ok=True)
 
+    # ── Unified cache: skip all API calls when data is still fresh ────────────
+    cm = CacheManager(cache_dir=str(cache_path), force_refresh=no_cache, ttl_hours=ttl_hours)
+    if cm.is_valid():
+        return cm.load()
+
+    logger.info("Fetching fresh external data for %d countries...", len(countries))
+
     session = requests.Session()
     session.headers.update({"User-Agent": "HVLP-Market-Scorer/1.0"})
 
     result = {c: {} for c in countries}
-    financing_raw = {}
-    raw_ahr = {}     # collected across countries; normalized after full loop
 
-    # -- One-shot Trading Economics call for all countries --
-    te_tax_rates = _fetch_te_corporate_tax(session, cache_path, ttl_hours, no_cache, te_api_key)
-
-    total = len(countries)
-    for idx, country in enumerate(countries, 1):
+    # Build ordered list of ISO3 codes that have a mapping (deduplicated)
+    seen_iso3: set = set()
+    valid_iso3: list = []
+    iso3_to_country: dict = {}
+    for country in countries:
         iso3 = country_iso3_map.get(country)
-        oecd_code = oecd_country_codes.get(country)
-
-        if not iso3:
+        if iso3:
+            iso3_to_country[iso3] = country   # last writer wins for duplicate iso3
+            if iso3 not in seen_iso3:
+                valid_iso3.append(iso3)
+                seen_iso3.add(iso3)
+        else:
             logger.warning(
-                "[%d/%d] %s: no ISO3 in COUNTRY_ISO3_MAP — skipping WB/OECD fetch.",
-                idx, total, country,
+                "%s: no ISO3 in COUNTRY_ISO3_MAP — skipping WB fetch.", country
             )
-            result[country] = {}
+
+    # ── World Bank: batch-fetch each indicator for ALL countries at once ──────
+    #
+    # Each tuple: (wb_series_key, indicator_code, mrv)
+    # wb_series_key is used to store results in wb_data[indicator_code][iso3]
+    # and is logged for progress visibility.
+    _WB_BATCH_PLAN = [
+        # Primary indicators
+        ("govt_effectiveness",    wb_indicators["govt_effectiveness"],  5),
+        ("political_stability",   wb_indicators["political_stability"], 5),
+        ("rule_of_law",           wb_indicators["rule_of_law"],         5),
+        ("inflation_rate",        wb_indicators["inflation_rate"],      5),
+        ("usd_exchange_rate",     wb_indicators["usd_exchange_rate"],  10),
+        ("youth_population",      "SP.POP.1564.TO.ZS",                 5),
+        ("gdp_growth",            "NY.GDP.MKTP.KD.ZG",                 7),  # GDP growth % — CAGR proxy
+        ("fin_domestic_credit",   _FINANCING_INDICATORS["domestic_credit"],    10),
+        ("fin_account_ownership", _FINANCING_INDICATORS["account_ownership"],  10),
+        ("fin_bank_branches",     _FINANCING_INDICATORS["bank_branches"],      10),
+        ("mc_q3",                 _MIDDLE_CLASS_INDICATORS["q3"],      10),
+        ("mc_q4",                 _MIDDLE_CLASS_INDICATORS["q4"],      10),
+        # Secondary / tertiary fallback indicators
+        ("regulatory_quality",    "RQ.EST",               5),   # secondary for ease_of_doing_business
+        ("voice_accountability",  "VA.EST",               5),   # secondary for political_stability
+        ("ctrl_of_corruption",    "CC.EST",               5),   # secondary for rule_of_law
+        ("gdp_deflator",          "NY.GDP.DEFL.KD.ZG",   5),   # secondary for inflation_rate
+        ("alt_fx_rate",           "PA.NUS.ATLS",         10),   # secondary for currency_volatility
+        ("pop_0_14",              "SP.POP.0014.TO.ZS",   5),    # secondary for youth_population_pct
+        ("pop_65_plus",           "SP.POP.65UP.TO.ZS",   5),    # tertiary for youth_population_pct
+        ("gini",                  "SI.POV.GINI",         10),   # secondary for middle_class_pct
+    ]
+
+    # wb_data[indicator_code][iso3] = [{date, value}, ...]
+    wb_data: dict = {}
+    n_plans = len(_WB_BATCH_PLAN)
+    for step_idx, (label, indicator, mrv) in enumerate(_WB_BATCH_PLAN, 1):
+        logger.info(
+            "WB batch [%d/%d] %s (%s) — %d countries",
+            step_idx, n_plans, label, indicator, len(valid_iso3),
+        )
+        batch = _wb_batch_get(session, valid_iso3, indicator, mrv)
+        wb_data[indicator] = batch   # {iso3: series}
+
+    # ── Map batched WB results into per-country result dict ───────────────────
+    financing_raw: dict = {}
+    raw_ahr: dict = {}
+
+    for country in countries:
+        iso3 = country_iso3_map.get(country)
+        if not iso3:
             financing_raw[country] = {}
             raw_ahr[country] = None
             continue
 
-        logger.info("[%d/%d] Fetching: %s (%s)", idx, total, country, iso3)
         d = result[country]
 
-        # ── World Bank: institutional / macro indicators ─────────────────────
+        def _get_series(indicator: str):
+            return wb_data.get(indicator, {}).get(iso3)
 
-        ge = _latest_value(_fetch_wb_series(session, cache_path, ttl_hours, no_cache,
-                              iso3, wb_indicators["govt_effectiveness"], mrv=5))
-        d["ease_of_doing_business"] = ge  # WGI Government Effectiveness (GE.EST)
+        # ── ease_of_doing_business ────────────────────────────────────────
+        # Primary: GE.EST (Government Effectiveness)
+        # Secondary: RQ.EST (Regulatory Quality)
+        # Both available → average (combined governance score, same WGI scale)
+        ge = _latest_value(_get_series(wb_indicators["govt_effectiveness"]))
+        rq = _latest_value(_get_series("RQ.EST"))
+        if ge is not None and rq is not None:
+            d["ease_of_doing_business"] = round((ge + rq) / 2, 4)
+            d["_eodb_data_tier"] = "primary+secondary_avg"
+        elif ge is not None:
+            d["ease_of_doing_business"] = ge
+            d["_eodb_data_tier"] = "primary"
+        elif rq is not None:
+            d["ease_of_doing_business"] = rq
+            d["_eodb_data_tier"] = "secondary"
+            logger.info("%s / ease_of_doing_business: using RQ.EST fallback.", country)
+        else:
+            d["ease_of_doing_business"] = None
+            d["_eodb_data_tier"] = "missing"
 
-        s = _fetch_wb_series(session, cache_path, ttl_hours, no_cache,
-                              iso3, wb_indicators["political_stability"], mrv=5)
-        d["political_stability"] = _latest_value(s)
+        # ── political_stability ───────────────────────────────────────────
+        # Primary: PV.EST  Secondary: VA.EST (Voice & Accountability — same WGI scale)
+        pv = _latest_value(_get_series(wb_indicators["political_stability"]))
+        va = _latest_value(_get_series("VA.EST"))
+        if pv is not None:
+            d["political_stability"] = pv
+            d["_pol_stab_data_tier"] = "primary"
+        elif va is not None:
+            d["political_stability"] = va
+            d["_pol_stab_data_tier"] = "secondary"
+            logger.info("%s / political_stability: using VA.EST fallback.", country)
+        else:
+            d["political_stability"] = None
+            d["_pol_stab_data_tier"] = "missing"
 
-        s = _fetch_wb_series(session, cache_path, ttl_hours, no_cache,
-                              iso3, wb_indicators["rule_of_law"], mrv=5)
-        d["rule_of_law"] = _latest_value(s)
+        # ── rule_of_law ───────────────────────────────────────────────────
+        # Primary: RL.EST  Secondary: CC.EST (Control of Corruption — same WGI scale)
+        rl = _latest_value(_get_series(wb_indicators["rule_of_law"]))
+        cc = _latest_value(_get_series("CC.EST"))
+        if rl is not None:
+            d["rule_of_law"] = rl
+            d["_rl_data_tier"] = "primary"
+        elif cc is not None:
+            d["rule_of_law"] = cc
+            d["_rl_data_tier"] = "secondary"
+            logger.info("%s / rule_of_law: using CC.EST (Control of Corruption) fallback.", country)
+        else:
+            d["rule_of_law"] = None
+            d["_rl_data_tier"] = "missing"
 
-        s = _fetch_wb_series(session, cache_path, ttl_hours, no_cache,
-                              iso3, wb_indicators["inflation_rate"], mrv=5)
-        d["inflation_rate"] = _latest_value(s)
+        # ── inflation_rate ────────────────────────────────────────────────
+        # Primary: FP.CPI.TOTL.ZG (CPI %)  Secondary: NY.GDP.DEFL.KD.ZG (GDP deflator %)
+        cpi      = _latest_value(_get_series(wb_indicators["inflation_rate"]))
+        deflator = _latest_value(_get_series("NY.GDP.DEFL.KD.ZG"))
+        if cpi is not None:
+            d["inflation_rate"] = cpi
+            d["_inflation_data_tier"] = "primary"
+        elif deflator is not None:
+            d["inflation_rate"] = deflator
+            d["_inflation_data_tier"] = "secondary"
+            logger.info("%s / inflation_rate: using GDP deflator fallback.", country)
+        else:
+            d["inflation_rate"] = None
+            d["_inflation_data_tier"] = "missing"
 
-        s = _fetch_wb_series(session, cache_path, ttl_hours, no_cache,
-                              iso3, wb_indicators["usd_exchange_rate"], mrv=10)
-        d["currency_volatility"] = _coefficient_of_variation(s)
+        # ── currency_volatility ───────────────────────────────────────────
+        # Primary: CoV of PA.NUS.FCRF  Secondary: CoV of PA.NUS.ATLS
+        # CoV is scale-invariant so both rate series are valid inputs.
+        fx_series = _get_series(wb_indicators["usd_exchange_rate"])
+        cv = _coefficient_of_variation(fx_series)
+        if cv is not None:
+            d["currency_volatility"] = cv
+            d["_fx_data_tier"] = "primary"
+        else:
+            alt_fx = _get_series("PA.NUS.ATLS")
+            cv_alt = _coefficient_of_variation(alt_fx)
+            if cv_alt is not None:
+                d["currency_volatility"] = cv_alt
+                d["_fx_data_tier"] = "secondary"
+                logger.info("%s / currency_volatility: using Atlas FX rate fallback.", country)
+            else:
+                d["currency_volatility"] = None
+                d["_fx_data_tier"] = "missing"
 
-        d["youth_population_pct"] = _fetch_youth_pct(
-            session, cache_path, ttl_hours, no_cache, iso3
-        )
+        # ── youth_population_pct ──────────────────────────────────────────
+        # Primary: SP.POP.1564.TO.ZS (working-age %, 15–64)
+        # Secondary: 100 − pop_0_14% − pop_65plus% (complement derivation)
+        # Tertiary: 100 − pop_0_14% only (if 65+ unavailable)
+        val = _latest_value(_get_series("SP.POP.1564.TO.ZS"))
+        if val is not None:
+            d["youth_population_pct"] = round(val, 4)
+            d["_youth_data_tier"] = "primary"
+        else:
+            p014 = _latest_value(_get_series("SP.POP.0014.TO.ZS"))
+            p65p = _latest_value(_get_series("SP.POP.65UP.TO.ZS"))
+            if p014 is not None and p65p is not None:
+                derived = round(100.0 - p014 - p65p, 4)
+                d["youth_population_pct"] = derived
+                d["_youth_data_tier"] = "secondary_derived"
+                logger.info(
+                    "%s / youth_population_pct: derived complement %.1f%%.", country, derived
+                )
+            elif p014 is not None:
+                d["youth_population_pct"] = round(100.0 - p014, 4)
+                d["_youth_data_tier"] = "tertiary_partial"
+                logger.info(
+                    "%s / youth_population_pct: partial complement (only 0–14 available).", country
+                )
+            else:
+                d["youth_population_pct"] = None
+                d["_youth_data_tier"] = "missing"
 
-        # ── World Bank: middle-class proxy (Q3 + Q4 income shares) ───────────
-        d["middle_class_pct"] = _fetch_middle_class_pct(
-            session, cache_path, ttl_hours, no_cache, iso3
-        )
+        # ── middle_class_pct ──────────────────────────────────────────────
+        # Primary: Q3 + Q4 income quintile shares (natural range ~30–45)
+        # Secondary: Gini-based estimate = (100 − Gini) × 0.40  (same ~30–40 range)
+        # Bounds [20, 60] applied to all paths to prevent unrealistic estimates.
+        q3 = _latest_value(_get_series(_MIDDLE_CLASS_INDICATORS["q3"]))
+        q4 = _latest_value(_get_series(_MIDDLE_CLASS_INDICATORS["q4"]))
+        if q3 is not None or q4 is not None:
+            raw_mc = (q3 or 0.0) + (q4 or 0.0)
+            d["middle_class_pct"] = round(min(max(raw_mc, 20.0), 60.0), 4)
+            d["_mc_data_tier"] = "primary" if (q3 is not None and q4 is not None) else "primary_partial"
+        else:
+            gini = _latest_value(_get_series("SI.POV.GINI"))
+            if gini is not None:
+                raw_mc = (100.0 - gini) * 0.40
+                d["middle_class_pct"] = round(min(max(raw_mc, 20.0), 60.0), 4)
+                d["_mc_data_tier"] = "secondary_gini"
+                logger.info(
+                    "%s / middle_class_pct: Gini-based estimate %.1f%%.",
+                    country, d["middle_class_pct"],
+                )
+            else:
+                d["middle_class_pct"] = None
+                d["_mc_data_tier"] = "missing"
 
-        # ── World Bank: financing components (scored after full country loop) ─
-        financing_raw[country] = _fetch_financing_components(
-            session, cache_path, ttl_hours, no_cache, iso3
-        )
+        # GDP growth rate — priority: Trading Economics → IMF → World Bank (5-yr avg)
+        # Result stored as gdp_cagr_proxy; override_loader multiplies by 1.4 → gym CAGR
+        te_gdp = te_gdp_rates.get(country)
+        if te_gdp is not None:
+            d["gdp_cagr_proxy"] = round(te_gdp, 4)
+            d["_gdp_source"] = "trading_economics"
+        else:
+            imf_gdp = imf_gdp_rates.get(country)
+            if imf_gdp is not None:
+                d["gdp_cagr_proxy"] = round(imf_gdp, 4)
+                d["_gdp_source"] = "imf"
+                logger.info(
+                    "%s / gdp_cagr_proxy: Trading Economics unavailable — using IMF %.2f%%.",
+                    country, imf_gdp,
+                )
+            else:
+                gdp_growth_series = _get_series("NY.GDP.MKTP.KD.ZG")
+                if gdp_growth_series:
+                    valid_rates = [
+                        obs["value"] for obs in gdp_growth_series
+                        if isinstance(obs, dict) and obs.get("value") is not None
+                    ][:5]
+                    if valid_rates:
+                        d["gdp_cagr_proxy"] = round(
+                            sum(valid_rates) / len(valid_rates), 4
+                        )
+                        d["_gdp_source"] = "world_bank"
+                        logger.info(
+                            "%s / gdp_cagr_proxy: TE and IMF unavailable — "
+                            "using World Bank 5yr avg %.2f%%.",
+                            country, d["gdp_cagr_proxy"],
+                        )
+                    else:
+                        d["gdp_cagr_proxy"] = None
+                        d["_gdp_source"] = "missing"
+                else:
+                    d["gdp_cagr_proxy"] = None
+                    d["_gdp_source"] = "missing"
 
-        # ── OECD: labour cost (AHR) — raw; indexed to US=100 after loop ──────
+        # Financing components (cross-country normalisation happens after loop)
+        financing_raw[country] = {
+            "domestic_credit": _latest_value(
+                _get_series(_FINANCING_INDICATORS["domestic_credit"])
+            ),
+            "account_ownership": _latest_value(
+                _get_series(_FINANCING_INDICATORS["account_ownership"])
+            ),
+            "bank_branches": _latest_value(
+                _get_series(_FINANCING_INDICATORS["bank_branches"])
+            ),
+        }
+
+        # OECD: labour cost (AHR) — indexed to US=100 after full country loop
+        oecd_code = oecd_country_codes.get(country)
         raw_ahr[country] = _fetch_oecd_ahr(
             session, cache_path, ttl_hours, no_cache, oecd_code
         )
 
-        # ── OECD: real estate cost (house price index) ────────────────────────
+        # OECD: real estate cost (house price index)
         housecost = _fetch_oecd_housecost(
             session, cache_path, ttl_hours, no_cache, oecd_code
         )
         if housecost is not None:
             d["real_estate_cost_index"] = housecost
 
-        # ── Trading Economics: corporate tax rate ─────────────────────────────
+    # ── GDP growth: TE (primary) → IMF (fallback) → WB (last resort) ─────────
+    # Fetched before the country loop so the results are available when we
+    # populate gdp_cagr_proxy inside the loop.
+    te_gdp_rates = _fetch_te_gdp_growth(
+        session, cache_path, ttl_hours, no_cache, te_api_key, countries
+    )
+    imf_gdp_rates = _fetch_imf_gdp_growth(
+        session, cache_path, ttl_hours, no_cache, imf_country_codes or {}
+    )
+
+    # ── Trading Economics: one shot for all countries ─────────────────────────
+    te_tax_rates = _fetch_te_corporate_tax(
+        session, cache_path, ttl_hours, no_cache, te_api_key
+    )
+    for country in countries:
         tax_val = te_tax_rates.get(country)
         if tax_val is not None:
-            d["corporate_tax_rate"] = tax_val
+            result[country]["corporate_tax_rate"] = tax_val
 
-    # -- Post-loop: financing scores (cross-country normalisation) --
+    # ── Post-loop: financing scores (cross-country normalisation) ─────────────
     financing_scores = compute_financing_scores(financing_raw, countries)
     for country in countries:
         fs = financing_scores.get(country, {})
@@ -526,12 +979,16 @@ def fetch_all_external_data(
         result[country]["_financing_partial"] = fs.get("partial", False)
         result[country]["_financing_components"] = fs.get("components", {})
 
-    # -- Post-loop: normalise AHR values to labour cost index (US = 100) --
+    # ── Post-loop: normalise AHR values to labour cost index (US = 100) ───────
     indexed_ahr = _normalize_oecd_ahr_to_index(raw_ahr)
     for country in countries:
         val = indexed_ahr.get(country)
         if val is not None:
             result[country]["labor_cost_index"] = val
 
-    logger.info("External data fetch complete for %d countries.", len(countries))
+    # ── Save unified cache so subsequent runs skip all API calls ──────────────
+    cm.save(result)
+    logger.info(
+        "External data fetch complete for %d countries.", len(countries)
+    )
     return result

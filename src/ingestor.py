@@ -16,6 +16,8 @@ Responsibilities:
 import logging
 import pandas as pd
 
+from src.utils.country_normalization import normalize_country_name
+
 logger = logging.getLogger(__name__)
 
 
@@ -81,8 +83,8 @@ def ingest_csv(path: str, column_map: dict) -> pd.DataFrame:
         if key in raw.columns:
             raw[key] = pd.to_numeric(raw[key], errors="coerce")
 
-    # Strip country name strings
-    raw["country"] = raw["country"].str.strip()
+    # Strip and normalize country name strings to canonical internal names
+    raw["country"] = raw["country"].str.strip().apply(normalize_country_name)
 
     # Drop rows where the country name is blank
     before = len(raw)

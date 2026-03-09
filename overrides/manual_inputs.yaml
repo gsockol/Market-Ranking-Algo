@@ -11,15 +11,70 @@
 #
 # Variable keys must match those in config.py WEIGHTS exactly.
 #
-# Seeded values below (2023/2024 data) — update as needed.
+# Data vintage: 2022–2024 (most-recent available).
 # Sources:
-#   corporate_tax_rate   : OECD Tax Database 2024 (statutory CIT rate, %)
-#   labor_cost_index     : Index vs US=100; derived from OECD/ILO average hourly
-#                          labour compensation in manufacturing (USD), 2023
-#   real_estate_cost_index: USD/sqm city-centre prime retail, Numbeo 2024
-#   middle_class_pct     : % population earning $10–$100/day PPP
-#                          (Pew Research / World Bank PovcalNet estimates, 2022)
+#   corporate_tax_rate       : OECD Tax Database 2024 (statutory CIT rate, %)
+#   labor_cost_index         : Index vs US=100; derived from OECD/ILO avg hourly
+#                              labour compensation in manufacturing (USD), 2023
+#   real_estate_cost_index   : USD/sqm city-centre prime retail, Numbeo 2024
+#   middle_class_pct         : % population earning $10–$100/day PPP
+#                              (Pew Research / World Bank PovcalNet, 2022)
+#   ease_of_doing_business   : World Bank WGI Government Effectiveness (GE.EST)
+#                              Scale –2.5 (worst) to +2.5 (best). 2022 vintage.
+#   political_stability      : World Bank WGI Political Stability (PV.EST)
+#                              Scale –2.5 to +2.5. 2022 vintage.
+#   rule_of_law              : World Bank WGI Rule of Law (RL.EST)
+#                              Scale –2.5 to +2.5. 2022 vintage.
+#   inflation_rate           : Annual CPI % change, 2023 (World Bank / IMF).
+#                              INVERTED in scoring — lower inflation = better.
+#   currency_volatility      : 3yr std dev of annual % changes in USD/local FX
+#                              (2020–2022). INVERTED — lower volatility = better.
+#                              EUR-zone countries share EUR/USD vol ≈ 5.5.
+#   youth_population_pct     : % population aged 15–64, World Bank 2022.
+#   financing_accessibility  : GFDD composite proxy (0–100): avg of min-max
+#                              normalised domestic credit, account ownership,
+#                              and bank branches per 100k adults (WB 2022).
 # =============================================================================
+
+# =============================================================================
+# PENETRATION OVERRIDES
+# =============================================================================
+# Override the future gym penetration rate assumption for specific countries.
+# Set enabled: true to activate this section; individual null values keep the
+# CSV default.  Values are fractions (e.g. 0.20 = 20%).
+#
+# These override the "Future_Penetration" column in input_data.csv.
+# Values are applied BEFORE derived metrics (headroom, TAM, opportunity) are
+# computed — so changing them here changes the entire market-size calculation.
+#
+# Validation rules applied at load time:
+#   • Must be a number in range (0, 1] — fractions only (not percentages)
+#   • Must be > current_penetration_pct for the country or the override is
+#     silently ignored (logged as a warning)
+# =============================================================================
+penetration_overrides:
+  enabled: false   # set to true to activate custom penetration assumptions
+  values:
+    Austria:        null   # default: 0.14 (CSV)
+    Belgium:        null   # default: 0.17 (CSV)
+    Brazil:         null   # default: 0.20 (CSV — updated Session 2)
+    Chile:          null   # default: 0.12 (CSV)
+    Colombia:       null   # default: 0.10 (CSV)
+    France:         null   # default: 0.15 (CSV)
+    Germany:        null   # default: 0.17 (CSV)
+    India:          null   # default: 0.08 (CSV)
+    Indonesia:      null   # default: 0.05 (CSV)
+    Italy:          null   # default: 0.12 (CSV)
+    Japan:          null   # default: 0.08 (CSV)
+    Netherlands:    null   # default: 0.18 (CSV)
+    Philippines:    null   # default: 0.04 (CSV)
+    Poland:         null   # default: 0.12 (CSV)
+    Portugal:       null   # default: 0.12 (CSV)
+    South Korea:    null   # default: 0.12 (CSV)
+    Switzerland:    null   # default: 0.18 (CSV)
+    Thailand:       null   # default: 0.08 (CSV)
+    Turkiye:        null   # default: 0.10 (CSV)
+    United Kingdom: null   # default: 0.15 (CSV)
 
 overrides:
   Austria:
@@ -27,117 +82,258 @@ overrides:
     labor_cost_index: 84.0
     real_estate_cost_index: 11800.0
     middle_class_pct: 68.0
+    ease_of_doing_business: 1.47
+    political_stability: 0.93
+    rule_of_law: 1.70
+    inflation_rate: 7.7
+    currency_volatility: 5.5
+    youth_population_pct: 66.2
+    financing_accessibility: 77.0
 
   Belgium:
     corporate_tax_rate: 25.0
     labor_cost_index: 91.0
     real_estate_cost_index: 5400.0
     middle_class_pct: 64.0
+    ease_of_doing_business: 1.24
+    political_stability: 0.37
+    rule_of_law: 1.38
+    inflation_rate: 4.1
+    currency_volatility: 5.5
+    youth_population_pct: 65.1
+    financing_accessibility: 78.0
 
   France:
     corporate_tax_rate: 25.0
     labor_cost_index: 77.0
     real_estate_cost_index: 13500.0
     middle_class_pct: 57.0
+    ease_of_doing_business: 1.24
+    political_stability: 0.14
+    rule_of_law: 1.41
+    inflation_rate: 5.7
+    currency_volatility: 5.5
+    youth_population_pct: 62.5
+    financing_accessibility: 75.0
 
   Germany:
     corporate_tax_rate: 29.9
     labor_cost_index: 87.0
     real_estate_cost_index: 8200.0
     middle_class_pct: 64.0
+    ease_of_doing_business: 1.72
+    political_stability: 0.65
+    rule_of_law: 1.73
+    inflation_rate: 6.0
+    currency_volatility: 5.5
+    youth_population_pct: 64.5
+    financing_accessibility: 80.0
 
   Netherlands:
     corporate_tax_rate: 25.8
     labor_cost_index: 82.0
     real_estate_cost_index: 9100.0
     middle_class_pct: 70.0
+    ease_of_doing_business: 1.84
+    political_stability: 0.93
+    rule_of_law: 1.93
+    inflation_rate: 4.1
+    currency_volatility: 5.5
+    youth_population_pct: 65.0
+    financing_accessibility: 88.0
 
   Portugal:
     corporate_tax_rate: 21.0
     labor_cost_index: 37.0
     real_estate_cost_index: 5500.0
     middle_class_pct: 52.0
+    ease_of_doing_business: 1.24
+    political_stability: 1.18
+    rule_of_law: 1.21
+    inflation_rate: 5.3
+    currency_volatility: 5.5
+    youth_population_pct: 64.8
+    financing_accessibility: 70.0
 
   Switzerland:
     corporate_tax_rate: 14.9
     labor_cost_index: 111.0
     real_estate_cost_index: 16200.0
     middle_class_pct: 72.0
+    ease_of_doing_business: 1.86
+    political_stability: 1.24
+    rule_of_law: 1.91
+    inflation_rate: 2.2
+    currency_volatility: 5.2
+    youth_population_pct: 66.1
+    financing_accessibility: 90.0
 
   Turkiye:
     corporate_tax_rate: 25.0
     labor_cost_index: 24.0
     real_estate_cost_index: 2100.0
     middle_class_pct: 42.0
+    ease_of_doing_business: -0.19
+    political_stability: -1.34
+    rule_of_law: -0.47
+    inflation_rate: 53.9
+    currency_volatility: 42.0
+    youth_population_pct: 67.1
+    financing_accessibility: 55.0
 
-  UK:
+  United Kingdom:
     corporate_tax_rate: 25.0
     labor_cost_index: 65.0
     real_estate_cost_index: 14800.0
     middle_class_pct: 60.0
+    ease_of_doing_business: 1.57
+    political_stability: 0.27
+    rule_of_law: 1.68
+    inflation_rate: 7.3
+    currency_volatility: 5.8
+    youth_population_pct: 63.4
+    financing_accessibility: 82.0
 
   Italy:
     corporate_tax_rate: 27.9
     labor_cost_index: 69.0
     real_estate_cost_index: 7800.0
     middle_class_pct: 55.0
+    ease_of_doing_business: 0.37
+    political_stability: 0.52
+    rule_of_law: 0.63
+    inflation_rate: 5.9
+    currency_volatility: 5.5
+    youth_population_pct: 63.3
+    financing_accessibility: 65.0
 
   Poland:
     corporate_tax_rate: 19.0
     labor_cost_index: 27.0
     real_estate_cost_index: 4100.0
     middle_class_pct: 55.0
+    ease_of_doing_business: 0.73
+    political_stability: 0.76
+    rule_of_law: 0.61
+    inflation_rate: 11.4
+    currency_volatility: 7.5
+    youth_population_pct: 67.5
+    financing_accessibility: 62.0
 
   Brazil:
     corporate_tax_rate: 34.0
     labor_cost_index: 22.0
     real_estate_cost_index: 2500.0
     middle_class_pct: 35.0
+    ease_of_doing_business: -0.23
+    political_stability: -0.33
+    rule_of_law: -0.11
+    inflation_rate: 4.6
+    currency_volatility: 11.0
+    youth_population_pct: 69.4
+    financing_accessibility: 58.0
 
   Chile:
     corporate_tax_rate: 27.0
     labor_cost_index: 20.0
     real_estate_cost_index: 3500.0
     middle_class_pct: 45.0
+    ease_of_doing_business: 0.89
+    political_stability: 0.14
+    rule_of_law: 0.90
+    inflation_rate: 7.6
+    currency_volatility: 9.0
+    youth_population_pct: 68.3
+    financing_accessibility: 65.0
 
   Colombia:
     corporate_tax_rate: 35.0
     labor_cost_index: 15.0
     real_estate_cost_index: 1800.0
     middle_class_pct: 30.0
+    ease_of_doing_business: -0.38
+    political_stability: -1.57
+    rule_of_law: -0.27
+    inflation_rate: 11.7
+    currency_volatility: 12.5
+    youth_population_pct: 65.7
+    financing_accessibility: 52.0
 
   India:
     corporate_tax_rate: 25.2
     labor_cost_index: 8.0
     real_estate_cost_index: 5900.0
     middle_class_pct: 12.0
+    ease_of_doing_business: -0.27
+    political_stability: -1.54
+    rule_of_law: -0.09
+    inflation_rate: 5.6
+    currency_volatility: 4.5
+    youth_population_pct: 67.8
+    financing_accessibility: 48.0
 
   South Korea:
     corporate_tax_rate: 24.0
     labor_cost_index: 58.0
     real_estate_cost_index: 10200.0
     middle_class_pct: 58.0
+    ease_of_doing_business: 1.20
+    political_stability: 0.47
+    rule_of_law: 1.12
+    inflation_rate: 3.6
+    currency_volatility: 8.5
+    youth_population_pct: 70.8
+    financing_accessibility: 78.0
 
   Indonesia:
     corporate_tax_rate: 22.0
     labor_cost_index: 10.0
     real_estate_cost_index: 2000.0
     middle_class_pct: 20.0
+    ease_of_doing_business: -0.10
+    political_stability: -0.92
+    rule_of_law: -0.38
+    inflation_rate: 3.5
+    currency_volatility: 6.5
+    youth_population_pct: 67.5
+    financing_accessibility: 45.0
 
   Thailand:
     corporate_tax_rate: 20.0
     labor_cost_index: 12.0
     real_estate_cost_index: 3600.0
     middle_class_pct: 30.0
+    ease_of_doing_business: 0.04
+    political_stability: -0.71
+    rule_of_law: -0.08
+    inflation_rate: 1.2
+    currency_volatility: 6.0
+    youth_population_pct: 70.1
+    financing_accessibility: 60.0
 
   Philippines:
     corporate_tax_rate: 25.0
     labor_cost_index: 9.0
     real_estate_cost_index: 3000.0
     middle_class_pct: 15.0
+    ease_of_doing_business: -0.43
+    political_stability: -0.94
+    rule_of_law: -0.42
+    inflation_rate: 6.0
+    currency_volatility: 6.5
+    youth_population_pct: 64.4
+    financing_accessibility: 48.0
 
   Japan:
     corporate_tax_rate: 29.7
     labor_cost_index: 72.0
     real_estate_cost_index: 12100.0
     middle_class_pct: 70.0
+    ease_of_doing_business: 1.49
+    political_stability: 0.92
+    rule_of_law: 1.58
+    inflation_rate: 3.3
+    currency_volatility: 12.0
+    youth_population_pct: 59.4
+    financing_accessibility: 85.0
+
