@@ -49,9 +49,10 @@ logger = logging.getLogger(__name__)
 _WB_BASE   = "https://api.worldbank.org/v2"
 _TE_BASE   = "https://api.tradingeconomics.com"
 _OECD_BASE = "https://stats.oecd.org/SDMX-JSON/data"
+_IMF_BASE  = "https://www.imf.org/external/datamapper/api/v1"
 
 _REQUEST_DELAY = 0.25   # seconds — polite rate limiting between calls
-_TIMEOUT       = 60     # seconds per HTTP request (raised from 20)
+_TIMEOUT       = 30     # seconds per HTTP request
 _MAX_RETRIES   = 3      # number of retry attempts after first failure
 
 
@@ -511,6 +512,127 @@ def _fetch_te_corporate_tax(session, cache_dir, ttl_hours, no_cache, api_key: st
 
 
 # ---------------------------------------------------------------------------
+# Trading Economics — GDP Growth Rate (primary GDP source)
+# ---------------------------------------------------------------------------
+
+# Map our canonical country names to Trading Economics URL slug format.
+_TE_COUNTRY_SLUGS: dict = {
+    "South Korea":    "south-korea",
+    "United Kingdom": "united-kingdom",
+    "Turkiye":        "turkey",
+    "Philippines":    "philippines",
+}
+
+
+def _country_to_te_slug(country: str) -> str:
+    return _TE_COUNTRY_SLUGS.get(country, country.lower().replace(" ", "-"))
+
+
+def _fetch_te_gdp_growth(
+    session, cache_dir, ttl_hours, no_cache, api_key: str, countries: list
+) -> dict:
+    """
+    Fetch latest real GDP growth rate for all countries from Trading Economics.
+    Returns {country_name: float_pct} or empty dict if key absent / call fails.
+    This is the **primary** source for gdp_cagr_proxy used in gym CAGR derivation.
+    """
+    if not api_key:
+        logger.info(
+            "TRADING_ECONOMICS_API_KEY not set — GDP growth will use IMF/WB fallback."
+        )
+        return {}
+
+    path = _cache_path(cache_dir, "te_gdp_growth_all")
+    if not no_cache and _cache_valid(path, ttl_hours):
+        return _read_cache(path)
+
+    slugs = ",".join(_country_to_te_slug(c) for c in countries)
+    url = f"{_TE_BASE}/country/{slugs}/indicator/gdp-growth-rate"
+    try:
+        resp = _http_get_with_retry(session, url, {"c": api_key, "f": "json"})
+        resp.raise_for_status()
+        records = resp.json()
+        if not isinstance(records, list):
+            logger.warning("TE GDP API: unexpected response format — falling back to IMF.")
+            return {}
+        result: dict = {}
+        for rec in records:
+            te_name = rec.get("Country", "")
+            our_name = normalize_country_name(te_name)
+            val = rec.get("LatestValue")
+            if val is not None:
+                try:
+                    result[our_name] = float(val)
+                except (TypeError, ValueError):
+                    pass
+        _write_cache(path, result)
+        logger.info(
+            "Trading Economics GDP growth: fetched rates for %d countries.", len(result)
+        )
+        return result
+    except Exception as exc:
+        logger.warning(
+            "Trading Economics GDP growth API error: %s — falling back to IMF.", exc
+        )
+        return {}
+
+
+# ---------------------------------------------------------------------------
+# IMF DataMapper — GDP Growth Rate (fallback GDP source)
+# ---------------------------------------------------------------------------
+
+
+def _fetch_imf_gdp_growth(
+    session, cache_dir, ttl_hours, no_cache, imf_country_codes: dict
+) -> dict:
+    """
+    Fetch real GDP growth (NGDP_RPCH) for all countries from IMF DataMapper.
+    Returns {country_name: float_pct} or empty dict on failure.
+    This is the **fallback** source when Trading Economics is unavailable.
+    """
+    path = _cache_path(cache_dir, "imf_gdp_growth_all")
+    if not no_cache and _cache_valid(path, ttl_hours):
+        return _read_cache(path)
+
+    # Build reverse map iso3 → country name
+    code_to_country = {v: k for k, v in imf_country_codes.items() if v}
+    codes = ";".join(v for v in imf_country_codes.values() if v)
+    if not codes:
+        return {}
+
+    url = f"{_IMF_BASE}/NGDP_RPCH/{codes}"
+    try:
+        resp = _http_get_with_retry(session, url, {})
+        resp.raise_for_status()
+        data = resp.json()
+        values = data.get("values", {}).get("NGDP_RPCH", {})
+        result: dict = {}
+        for code, year_data in values.items():
+            country = code_to_country.get(code)
+            if not country or not year_data:
+                continue
+            # Pick most recent year with a non-null value
+            for year in sorted(year_data.keys(), reverse=True):
+                val = year_data[year]
+                if val is not None:
+                    try:
+                        result[country] = float(val)
+                    except (TypeError, ValueError):
+                        pass
+                    break
+        _write_cache(path, result)
+        logger.info(
+            "IMF DataMapper GDP growth: fetched rates for %d countries.", len(result)
+        )
+        return result
+    except Exception as exc:
+        logger.warning(
+            "IMF DataMapper GDP growth API error: %s — falling back to World Bank.", exc
+        )
+        return {}
+
+
+# ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
 
@@ -523,6 +645,7 @@ def fetch_all_external_data(
     cache_dir: str,
     ttl_hours: float,
     no_cache: bool = False,
+    imf_country_codes: dict | None = None,
 ) -> dict:
     """
     Fetch all external data for every country.
@@ -764,16 +887,44 @@ def fetch_all_external_data(
                 d["middle_class_pct"] = None
                 d["_mc_data_tier"] = "missing"
 
-        # GDP growth rate — 5-year average used as gym membership CAGR proxy
-        gdp_growth_series = _get_series("NY.GDP.MKTP.KD.ZG")
-        if gdp_growth_series:
-            valid_rates = [
-                obs["value"] for obs in gdp_growth_series
-                if isinstance(obs, dict) and obs.get("value") is not None
-            ][:5]  # use up to 5 most-recent years
-            d["gdp_cagr_proxy"] = round(sum(valid_rates) / len(valid_rates), 4) if valid_rates else None
+        # GDP growth rate — priority: Trading Economics → IMF → World Bank (5-yr avg)
+        # Result stored as gdp_cagr_proxy; override_loader multiplies by 1.4 → gym CAGR
+        te_gdp = te_gdp_rates.get(country)
+        if te_gdp is not None:
+            d["gdp_cagr_proxy"] = round(te_gdp, 4)
+            d["_gdp_source"] = "trading_economics"
         else:
-            d["gdp_cagr_proxy"] = None
+            imf_gdp = imf_gdp_rates.get(country)
+            if imf_gdp is not None:
+                d["gdp_cagr_proxy"] = round(imf_gdp, 4)
+                d["_gdp_source"] = "imf"
+                logger.info(
+                    "%s / gdp_cagr_proxy: Trading Economics unavailable — using IMF %.2f%%.",
+                    country, imf_gdp,
+                )
+            else:
+                gdp_growth_series = _get_series("NY.GDP.MKTP.KD.ZG")
+                if gdp_growth_series:
+                    valid_rates = [
+                        obs["value"] for obs in gdp_growth_series
+                        if isinstance(obs, dict) and obs.get("value") is not None
+                    ][:5]
+                    if valid_rates:
+                        d["gdp_cagr_proxy"] = round(
+                            sum(valid_rates) / len(valid_rates), 4
+                        )
+                        d["_gdp_source"] = "world_bank"
+                        logger.info(
+                            "%s / gdp_cagr_proxy: TE and IMF unavailable — "
+                            "using World Bank 5yr avg %.2f%%.",
+                            country, d["gdp_cagr_proxy"],
+                        )
+                    else:
+                        d["gdp_cagr_proxy"] = None
+                        d["_gdp_source"] = "missing"
+                else:
+                    d["gdp_cagr_proxy"] = None
+                    d["_gdp_source"] = "missing"
 
         # Financing components (cross-country normalisation happens after loop)
         financing_raw[country] = {
@@ -800,6 +951,16 @@ def fetch_all_external_data(
         )
         if housecost is not None:
             d["real_estate_cost_index"] = housecost
+
+    # ── GDP growth: TE (primary) → IMF (fallback) → WB (last resort) ─────────
+    # Fetched before the country loop so the results are available when we
+    # populate gdp_cagr_proxy inside the loop.
+    te_gdp_rates = _fetch_te_gdp_growth(
+        session, cache_path, ttl_hours, no_cache, te_api_key, countries
+    )
+    imf_gdp_rates = _fetch_imf_gdp_growth(
+        session, cache_path, ttl_hours, no_cache, imf_country_codes or {}
+    )
 
     # ── Trading Economics: one shot for all countries ─────────────────────────
     te_tax_rates = _fetch_te_corporate_tax(

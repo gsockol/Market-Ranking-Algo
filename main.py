@@ -74,6 +74,76 @@ def _build_availability(df: pd.DataFrame, scored_vars: list) -> dict:
     return matrix
 
 
+def _collect_pre_run_overrides(
+    df: pd.DataFrame, interactive: bool
+) -> tuple[dict, dict]:
+    """
+    Prompt the user for optional pre-run session overrides.
+
+    Returns
+    -------
+    (penetration_overrides, gdp_growth_overrides)
+        penetration_overrides : {country: future_penetration_fraction}
+            Passed to calculate_derived_metrics(); replaces future_penetration_pct
+            before downstream metrics (headroom, opportunity, potential_market_size)
+            are computed.  Silently ignored when value < current_penetration_pct.
+        gdp_growth_overrides  : {country: gdp_growth_rate_pct}
+            Converted to gym_membership_cagr = gdp_growth × 1.4 and passed as
+            gui_cagr_overrides to merge_overrides().  Does NOT modify any files.
+    """
+    penetration_overrides: dict = {}
+    gdp_growth_overrides: dict = {}
+
+    if not interactive:
+        return penetration_overrides, gdp_growth_overrides
+
+    print("\n" + "=" * 64)
+    print("  PRE-RUN OVERRIDES  (session-only; no files are modified)")
+    print("=" * 64)
+
+    # ── Gym Penetration Override ────────────────────────────────────────────
+    yn = input("\nOverride target gym penetration for any country? (y/n): ").strip().lower()
+    if yn == "y":
+        for _, row in df.iterrows():
+            country = row["country"]
+            cur = row.get("current_penetration_pct")
+            fut = row.get("future_penetration_pct")
+            cur_str = f"{cur:.1%}" if pd.notna(cur) else "?"
+            fut_str = f"{fut:.1%}" if pd.notna(fut) else "?"
+            raw = input(
+                f"  {country:<22} current={cur_str}, base target={fut_str}"
+                " — new target (fraction, e.g. 0.15, or Enter to skip): "
+            ).strip()
+            if raw:
+                try:
+                    penetration_overrides[country] = float(raw)
+                except ValueError:
+                    print(f"    '{raw}' is not a valid number — skipped.")
+
+    # ── GDP Growth Override ─────────────────────────────────────────────────
+    yn2 = input("\nOverride GDP growth rate for any country? (y/n): ").strip().lower()
+    if yn2 == "y":
+        print("  Note: gym_membership_cagr = GDP_growth_rate × 1.4")
+        for _, row in df.iterrows():
+            country = row["country"]
+            raw = input(
+                f"  {country:<22} GDP growth % (e.g. 4.5, or Enter to skip): "
+            ).strip()
+            if raw:
+                try:
+                    gdp_growth_overrides[country] = float(raw)
+                except ValueError:
+                    print(f"    '{raw}' is not a valid number — skipped.")
+
+    if penetration_overrides or gdp_growth_overrides:
+        print(
+            f"\n  Overrides captured — penetration: {len(penetration_overrides)} countries, "
+            f"GDP growth: {len(gdp_growth_overrides)} countries."
+        )
+    print("=" * 64 + "\n")
+    return penetration_overrides, gdp_growth_overrides
+
+
 def _print_summary(scores_df: pd.DataFrame) -> None:
     print("\n" + "=" * 64)
     print("  HVLP GLOBAL GYM MARKET OPPORTUNITY — RESULTS SUMMARY")
@@ -139,11 +209,22 @@ def main():
     logger.info("Countries loaded: %s", countries)
 
     # ------------------------------------------------------------------
+    # PRE-RUN: collect session-only overrides (interactive mode only)
+    # ------------------------------------------------------------------
+    penetration_overrides, gdp_growth_overrides = _collect_pre_run_overrides(
+        df, args.interactive
+    )
+
+    # ------------------------------------------------------------------
     # STEP 2 — Derived metrics
     # ------------------------------------------------------------------
     logger.info("Step 2/10: Computing derived metrics …")
     from src.calculator import calculate_derived_metrics
-    df = calculate_derived_metrics(df, cfg.DUES_INCREASE_PCT)
+    df = calculate_derived_metrics(
+        df,
+        cfg.DUES_INCREASE_PCT,
+        penetration_overrides=penetration_overrides if penetration_overrides else None,
+    )
 
     # ------------------------------------------------------------------
     # STEP 3 — Fetch external data
@@ -166,6 +247,7 @@ def main():
             cache_dir=cfg.CACHE_DIR,
             ttl_hours=cfg.CACHE_EXPIRY_HOURS,
             no_cache=args.no_cache or args.refresh_api,
+            imf_country_codes=cfg.IMF_COUNTRY_CODES,
         )
 
     # ------------------------------------------------------------------
@@ -179,12 +261,19 @@ def main():
     # STEP 5 — Merge all data sources
     # ------------------------------------------------------------------
     logger.info("Step 5/10: Merging data sources …")
+    # Convert GDP growth overrides → gym_membership_cagr via the same ×1.4 formula
+    gui_cagr_overrides = (
+        {c: round(v * 1.4, 4) for c, v in gdp_growth_overrides.items()}
+        if gdp_growth_overrides
+        else None
+    )
     df, audit = merge_overrides(
         df=df,
         external_data=external_data,
         yaml_overrides=yaml_overrides,
         scored_variables=scored_vars,
         interactive=args.interactive,
+        gui_cagr_overrides=gui_cagr_overrides,
     )
 
     # ------------------------------------------------------------------

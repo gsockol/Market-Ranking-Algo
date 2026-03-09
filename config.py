@@ -14,34 +14,34 @@ import os
 # To disable a variable: set its weight to 0.0 and redistribute manually.
 # -----------------------------------------------------------------------------
 WEIGHTS = {
-    # --- Market Opportunity (30%) ---
-    "opportunity_usd_m":       0.20,   # ($M) Potential Market Size − Current Market Size
-    "potential_market_size":   0.10,   # ($M) Implied Future Members × Future Dues × 12
+    # --- Market Opportunity (46%) ---
+    "opportunity_usd_m":       0.28,   # ($M) Potential Market Size − Current Market Size
+    "potential_market_size":   0.18,   # ($M) Implied Future Members × Future Dues × 12
 
-    # --- Penetration / Membership (20%) ---
-    "gym_membership_cagr":     0.08,   # 5yr CAGR of gym membership %; redistributed via Rule 1 if missing
-    "penetration_headroom":    0.10,   # Future Penetration % − Current Penetration %
-    "concentration":           0.02,   # Market concentration; redistributed via Rule 2 if missing
+    # --- Penetration / Membership (25%) ---
+    "gym_membership_cagr":     0.08,   # GDP_CAGR × 1.4; sourced TE → IMF → WB; never zero
+    "penetration_headroom":    0.12,   # Future Penetration % − Current Penetration %
+    "concentration":           0.05,   # Market concentration; redistributed via Rule 2 if missing
 
-    # --- Demand Indicators (22%) ---
-    "youth_population_pct":    0.07,   # % population aged 15–64 (World Bank)
-    "middle_class_pct":        0.06,   # % population middle class — primary demand signal
-    "avg_gym_spend_pct_gdp":   0.09,   # (Current Dues×12) ÷ GDP per Capita — affordability
+    # --- Demand Indicators (9%) ---
+    "youth_population_pct":    0.03,   # % population aged 15–64 (World Bank)
+    "middle_class_pct":        0.04,   # % population middle class — primary demand signal
+    "avg_gym_spend_pct_gdp":   0.02,   # (Current Dues×12) ÷ GDP per Capita — affordability
 
-    # --- Cost Structure (9%) ---
-    "real_estate_cost_index":  0.04,   # OECD RHPI; INVERTED (lower = better)
-    "labor_cost_index":        0.02,   # Index vs US=100; INVERTED (lower = better)
-    "corporate_tax_rate":      0.03,   # Statutory CIT rate %; INVERTED (lower = better)
+    # --- Cost Structure (8%) ---
+    "real_estate_cost_index":  0.03,   # OECD RHPI; INVERTED (lower = better)
+    "labor_cost_index":        0.03,   # Index vs US=100; INVERTED (lower = better)
+    "corporate_tax_rate":      0.02,   # Statutory CIT rate %; INVERTED (lower = better)
 
-    # --- Operational Risk (19%) ---
-    "ease_of_doing_business":  0.04,   # WGI GE.EST + RQ.EST avg (higher = better)
-    "political_stability":     0.03,   # World Bank WGI PV.EST (higher = better)
-    "rule_of_law":             0.04,   # World Bank WGI RL.EST (−2.5 to +2.5)
-    "inflation_rate":          0.02,   # Annual CPI %; INVERTED (lower = better score)
-    "currency_volatility":     0.02,   # CoV of LCU/USD exchange rate; INVERTED
+    # --- Operational Risk (12%) ---
+    "ease_of_doing_business":  0.03,   # WGI GE.EST + RQ.EST avg (higher = better)
+    "political_stability":     0.01,   # World Bank WGI PV.EST (higher = better)
+    "rule_of_law":             0.02,   # World Bank WGI RL.EST (−2.5 to +2.5)
+    "inflation_rate":          0.01,   # Annual CPI %; INVERTED (lower = better score)
+    "currency_volatility":     0.01,   # CoV of LCU/USD exchange rate; INVERTED
     "financing_accessibility": 0.04,   # Composite: credit depth, account access, bank branches
 }
-# sum = 0.20+0.10+0.08+0.10+0.02+0.07+0.06+0.09+0.04+0.02+0.03+0.04+0.03+0.04+0.02+0.02+0.04
+# sum = 0.28+0.18+0.08+0.12+0.05+0.03+0.04+0.02+0.03+0.03+0.02+0.03+0.01+0.02+0.01+0.01+0.04
 #     = 1.0000 exactly ✓  (17 variables)
 
 # -----------------------------------------------------------------------------
@@ -101,25 +101,27 @@ VARIABLE_CATEGORIES = {
 
 # Rule 1: If gym_membership_cagr is missing
 # cagr weight (0.08) redistributed proportionally to remaining demand indicators.
-# remaining demand = youth(0.07) + middle_class(0.06) + avg_gym_spend(0.09) = 0.22
-# middle_override    = 0.06 + 0.08×(6/22)  = 0.0818
-# avg_spend_override = 0.09 + 0.08×(9/22)  = 0.1227
-# youth_override     = 0.07 + 0.08×(7/22)  = 0.0955   (sum = 0.3000 ✓)
+# remaining demand = youth(0.03) + middle_class(0.04) + avg_gym_spend(0.02) = 0.09
+# youth_override     = 0.03 + 0.08×(3/9)  = 0.0567
+# middle_override    = 0.04 + 0.08×(4/9)  = 0.0756
+# avg_spend_override = 0.02 + 0.08×(2/9)  = 0.0378   (sum = 0.1701 ≈ 0.17 ✓)
+# NOTE: CAGR is now sourced from GDP_CAGR×1.4; Rule 1 triggers only when all
+#       GDP sources (TE, IMF, WB) and manual overrides are unavailable.
 RULE1_MISSING_CAGR = {
     "zero_out": "gym_membership_cagr",
     "override": {
-        "middle_class_pct":      0.0818,
-        "avg_gym_spend_pct_gdp": 0.1227,
-        "youth_population_pct":  0.0955,
+        "youth_population_pct":  0.0567,
+        "middle_class_pct":      0.0756,
+        "avg_gym_spend_pct_gdp": 0.0378,
     },
 }
 
 # Rule 2: If concentration is missing
-# concentration weight (0.02) added to penetration_headroom: 0.10 + 0.02 = 0.12
+# concentration weight (0.05) added to penetration_headroom: 0.12 + 0.05 = 0.17
 RULE2_MISSING_CONCENTRATION = {
     "zero_out": "concentration",
     "override": {
-        "penetration_headroom": 0.12,
+        "penetration_headroom": 0.17,
     },
 }
 
@@ -319,6 +321,7 @@ OECD_COUNTRY_CODES = {
 # -----------------------------------------------------------------------------
 IMF_INDICATORS = {
     "inflation_rate": "PCPIPCH",   # Inflation, average consumer prices (% change)
+    "gdp_growth":     "NGDP_RPCH", # Real GDP growth (% change) — used as gym CAGR source
 }
 
 IMF_COUNTRY_CODES = {
@@ -374,6 +377,7 @@ CSV_COLUMN_MAP = {
     "Concentration_000s_per_Gym": "concentration",
     "GDP_per_Capita_USD":         "gdp_per_capita",
     "Gym_Membership_CAGR":        "gym_membership_cagr",
+    "GDP_CAGR":                   "gdp_cagr_csv",          # Local CSV fallback for gym CAGR
     # MSD-spec aliases — so the spec example CSV also works without modification
     "Market Size ($M)":           "market_size_m",
     "Current Penetration %":      "current_penetration_pct",
