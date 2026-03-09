@@ -267,14 +267,34 @@ def main():
         if gdp_growth_overrides
         else None
     )
+    # Include composite input variables (labor, real_estate) so merge_overrides
+    # populates them in df even though they're no longer individually scored.
+    merge_vars = scored_vars + cfg.COMPOSITE_INPUT_VARIABLES
     df, audit = merge_overrides(
         df=df,
         external_data=external_data,
         yaml_overrides=yaml_overrides,
-        scored_variables=scored_vars,
+        scored_variables=merge_vars,
         interactive=args.interactive,
         gui_cagr_overrides=gui_cagr_overrides,
     )
+
+    # ------------------------------------------------------------------
+    # STEP 5b — Composite variables (need full merged dataset with YAML values)
+    # ------------------------------------------------------------------
+    logger.info("Step 5b/10: Computing composite variables …")
+    from src.calculator import calculate_composite_variables
+    df = calculate_composite_variables(df)
+
+    # Patch audit trail: composite variables are computed here, not from any
+    # external source, so merge_overrides recorded "missing" for them.
+    for country in countries:
+        crow = df.loc[df["country"] == country]
+        if not crow.empty:
+            if pd.notna(crow["operating_cost_composite"].values[0]):
+                audit[country]["operating_cost_composite"] = "computed_composite"
+            if pd.notna(crow["market_agility_bonus"].values[0]):
+                audit[country]["market_agility_bonus"] = "computed_composite"
 
     # ------------------------------------------------------------------
     # STEP 6 — Normalise
@@ -288,6 +308,8 @@ def main():
         cfg.USA_BASELINE,
         outlier_cap_variables=cfg.OUTLIER_CAP_VARIABLES,
         outlier_cap_percentile=cfg.OUTLIER_CAP_PERCENTILE,
+        pre_transforms=cfg.PRE_TRANSFORMS,
+        clip_p05p95_variables=cfg.CLIP_P05P95_VARIABLES,
     )
 
     # ------------------------------------------------------------------

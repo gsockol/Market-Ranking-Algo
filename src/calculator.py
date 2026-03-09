@@ -173,3 +173,75 @@ def calculate_derived_metrics(
 
     logger.info("Derived metrics computed for %d countries.", len(df))
     return df
+
+
+def calculate_composite_variables(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Compute cross-country composite variables requiring dataset-wide min/max context.
+
+    Must be called AFTER merge_overrides() so that YAML-supplied values for
+    labor_cost_index and real_estate_cost_index are present in df.
+    Must be called BEFORE normalize_all().
+
+    Columns added
+    -------------
+    operating_cost_composite : float in [0, 1]
+        Inverted min-max scaled composite: labor_cost_index (×0.6) + real_estate_cost_index (×0.4).
+        Higher value = cheaper operating cost = better.
+        NOT in INVERTED_VARIABLES — inversion is baked into the formula here.
+    market_agility_bonus : float > 0
+        1 / sqrt(potential_market_size).
+        Higher for smaller potential markets — rewards compact, efficient entry opportunities.
+        NOT in INVERTED_VARIABLES — higher raw value is already semantically better.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Merged DataFrame containing at minimum labor_cost_index,
+        real_estate_cost_index, and potential_market_size columns.
+
+    Returns
+    -------
+    pd.DataFrame
+        Original DataFrame with two new columns appended.
+    """
+    # ── Operating cost composite ──────────────────────────────────────────────
+    labor = df["labor_cost_index"].copy().astype(float)
+    re    = df["real_estate_cost_index"].copy().astype(float)
+    valid_labor = labor.notna()
+    valid_re    = re.notna()
+
+    def _inverted_minmax(series: pd.Series) -> pd.Series:
+        """Scale series to [0, 1] with inversion: lower raw value → higher score."""
+        lo, hi = series.min(), series.max()
+        if hi == lo:
+            return pd.Series(0.5, index=series.index)
+        return (hi - series) / (hi - lo)
+
+    labor_scaled = _inverted_minmax(labor[valid_labor]).reindex(df.index)
+    re_scaled    = _inverted_minmax(re[valid_re]).reindex(df.index)
+
+    composite = pd.Series(np.nan, index=df.index)
+    both = valid_labor & valid_re
+    composite[both] = labor_scaled[both] * 0.6 + re_scaled[both] * 0.4
+    # Partial fallback: use whichever component is available at full weight
+    labor_only = valid_labor & ~valid_re
+    re_only    = ~valid_labor & valid_re
+    composite[labor_only] = labor_scaled[labor_only]
+    composite[re_only]    = re_scaled[re_only]
+    df["operating_cost_composite"] = composite
+
+    # ── Market agility bonus ──────────────────────────────────────────────────
+    pot = df["potential_market_size"].copy().astype(float)
+    df["market_agility_bonus"] = np.where(
+        pot.notna() & (pot > 0),
+        1.0 / np.sqrt(pot.clip(lower=0.01)),
+        np.nan,
+    )
+
+    logger.info(
+        "Composite variables computed: operating_cost_composite (%d/%d countries), "
+        "market_agility_bonus (%d/%d countries).",
+        both.sum(), len(df), pot.notna().sum(), len(df),
+    )
+    return df
