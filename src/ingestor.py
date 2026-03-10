@@ -1,98 +1,42 @@
-"""
-src/ingestor.py
-===============
-Schema-agnostic CSV ingestion.
-
-Responsibilities:
-- Read any CSV file with pandas — no assumptions about row count or column count.
-- Strip leading/trailing whitespace from all column headers.
-- Rename columns from CSV labels to internal snake_case keys using the
-  caller-supplied column_map.  Extra columns not in the map are preserved
-  under their stripped name so the pipeline never silently drops user data.
-- Parse blank / whitespace-only cells as NaN uniformly.
-- Return a clean DataFrame ready for downstream calculation.
-"""
-
-import logging
 import pandas as pd
+import logging
 
-from src.utils.country_normalization import normalize_country_name
-
-logger = logging.getLogger(__name__)
-
-
-def ingest_csv(path: str, column_map: dict) -> pd.DataFrame:
+def ingest_csv(file_path):
     """
-    Read *path* and return a normalised DataFrame.
-
-    Parameters
-    ----------
-    path : str
-        Absolute or relative path to the CSV file.
-    column_map : dict
-        {csv_header: internal_key} mapping from config.CSV_COLUMN_MAP.
-
-    Returns
-    -------
-    pd.DataFrame
-        One row per country.  All column names are internal snake_case keys.
-        Unmapped extra columns are kept under their stripped CSV name.
+    SECTION 6: Data Loading & Schema Validation
+    Maps raw CSV headers to internal system variables.
     """
-    try:
-        raw = pd.read_csv(
-            path,
-            dtype=str,          # read everything as string first — avoids
-            keep_default_na=True,  # silent type coercion surprises
-            skipinitialspace=True,
-        )
-    except FileNotFoundError:
-        raise FileNotFoundError(
-            f"Input CSV not found: '{path}'. "
-            "Check --csv argument or place file at data/input_data.csv"
-        )
-
-    # Strip whitespace from all column headers
-    raw.columns = [c.strip() for c in raw.columns]
-
-    # Log any CSV columns that are not in column_map (not an error — just info)
-    mapped_keys = set(column_map.keys())
-    extra_cols = [c for c in raw.columns if c not in mapped_keys]
-    if extra_cols:
-        logger.debug("CSV contains unmapped columns (kept as-is): %s", extra_cols)
-
-    # Rename mapped columns; leave extras untouched
-    raw = raw.rename(columns=column_map)
-
-    # Confirm all required internal keys are now present
-    required = set(column_map.values())
-    missing_keys = required - set(raw.columns)
-    if missing_keys:
-        raise ValueError(
-            f"CSV is missing expected column(s) after mapping: {missing_keys}. "
-            f"Available stripped headers: {list(raw.columns)}"
-        )
-
-    # Replace blank / whitespace-only strings with NaN uniformly
-    raw = raw.apply(
-        lambda col: col.str.strip().replace("", pd.NA) if col.dtype == object else col
-    )
-
-    # Convert numeric columns (everything except "country" and any string extras)
-    numeric_keys = [k for k in column_map.values() if k != "country"]
-    for key in numeric_keys:
-        if key in raw.columns:
-            raw[key] = pd.to_numeric(raw[key], errors="coerce")
-
-    # Strip and normalize country name strings to canonical internal names
-    raw["country"] = raw["country"].str.strip().apply(normalize_country_name)
-
-    # Drop rows where the country name is blank
-    before = len(raw)
-    raw = raw.dropna(subset=["country"]).reset_index(drop=True)
-    if len(raw) < before:
-        logger.warning(
-            "Dropped %d row(s) with blank country name.", before - len(raw)
-        )
-
-    logger.info("Ingested %d countries from '%s'.", len(raw), path)
-    return raw
+    df = pd.read_csv(file_path)
+    
+    # Header Normalization
+    df.columns = [c.strip() for c in df.columns]
+    
+    # Internal Mapping Table (Maps your CSV to Spec Section 4)
+    mapping = {
+        'Country': 'country',
+        'Opportunity ($M)': 'opportunity_usd_m',
+        'Potential Market Size ($M)': 'potential_market_size',
+        'Gym Membership CAGR': 'gym_membership_cagr',
+        'Penetration Headroom': 'headroom',
+        'Concentration (000s/gym)': 'concentration',
+        'Ease of Doing Business': 'ease_of_doing_business',
+        'Political Stability': 'political_stability',
+        'Inflation Rate': 'inflation',
+        'Currency Volatility': 'currency_volatility',
+        'Rule of Law': 'rule_of_law',
+        'Ease of Financing (GFDD)': 'financing_access',
+        'Corporate Tax Rate': 'corporate_tax_rate',
+        'Labour Cost Index': 'labor_cost_index',
+        'Real Estate Cost Index': 'real_estate_cost_index',
+        'Youth / Working Age Population % (15–64)': 'youth_population_pct',
+        'Middle Class %': 'middle_class_pct',
+        'Avg Gym Spend as % of GDP': 'fitness_spend_proxy'
+    }
+    
+    df = df.rename(columns=mapping)
+    
+    # Validate Required Primary Key
+    if 'country' not in df.columns:
+        raise KeyError("REQUIRED COLUMN MISSING: Could not find 'Country' in CSV.")
+        
+    return df
