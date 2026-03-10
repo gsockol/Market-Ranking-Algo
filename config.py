@@ -1,41 +1,33 @@
-# Exact weight distribution from Weight Matrix CSV
+# config.py - Optimized for HVLP Ranking
 WEIGHTS = {
-    "opportunity_usd_m": 0.225,
-    "potential_market_size_usd_m": 0.125,
-    "gym_membership_cagr": 0.05,
-    "penetration_headroom": 0.08,
-    "concentration_000s_gym": 0.02,
-    "ease_of_doing_business": 0.05,
-    "political_stability": 0.04,
-    "inflation_rate": 0.03,
-    "currency_volatility": 0.03,
-    "rule_of_law": 0.05,
-    "ease_of_financing_gfdd": 0.05,
-    "corporate_tax_rate": 0.03,
-    "labour_cost_index": 0.02,
-    "real_estate_cost_index": 0.05,
-    "youth_population_pct": 0.05,
-    "middle_class_pct": 0.05,
-    "gym_spend_pct_gdp": 0.05
+    # Update 1: Consolidated Market Scale (25%)
+    'Opportunity ($M)': 0.15,
+    'Potential Market Size ($M)': 0.10,
+    
+    # Update 3: Institutional Risk Consolidation (10%)
+    'Ease of Doing Business': 0.03,
+    'Political Stability': 0.03,
+    'Rule of Law': 0.04,
+    
+    # Core HVLP Drivers (Increased Weights)
+    'Penetration Headroom': 0.15,  # Priority for HVLP
+    'Gym Membership CAGR': 0.10,   # Growth focus
+    
+    # Costs & Demographics (15% & 15%)
+    'Real Estate Cost Index': 0.10,
+    'Corporate Tax Rate': 0.05,
+    'Youth / Working Age Population % (15–64)': 0.10,
+    'Middle Class %': 0.05,
+    
+    # Operations & Macro (10%)
+    'Ease of Financing (GFDD)': 0.05,
+    'Avg Gym Spend as % of GDP': 0.05
 }
 
-# Costs and Risk indicators that should be inverted (Lower is Better)
-INVERTED_VARIABLES = [
-    "corporate_tax_rate", 
-    "concentration_000s_gym", 
-    "labour_cost_index", 
-    "real_estate_cost_index", 
-    "inflation_rate", 
-    "currency_volatility"
+# These columns should be ranked ascending (lower value is better)
+INVERTED_METRICS = [
+    'Corporate Tax Rate', 
+    'Real Estate Cost Index', 
+    'Inflation Rate', 
+    'Currency Volatility'
 ]
-
-# Statistical transforms to handle market size outliers (Section 7.3)
-PRE_TRANSFORMS = {"log": ["opportunity_usd_m", "potential_market_size_usd_m"]}
-
-ISO_MAP = {
-    "Austria": "AUT", "Belgium": "BEL", "France": "FRA", "Germany": "DEU",
-    "Netherlands": "NLD", "Portugal": "PRT", "Switzerland": "CHE", "Turkiye": "TUR",
-    "United Kingdom": "GBR", "UK": "GBR", "Italy": "ITA", "Poland": "POL", 
-    "Brazil": "BRA", "Chile": "CHL", "Colombia": "COL", "India": "IND", 
-    "South Korea": "KOR", "Indonesia": "IDN", "Thailand": "THA", "Philippines": "PHL", "Japan": "JPN"
-}
