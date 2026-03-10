@@ -1,39 +1,28 @@
-# config.py
+# --- config.py Simulation ---
+import numpy as np
 
-# Optimized Weights for HVLP (Updates 1 & 3 applied)
-# Scale reduced to 25%, Institutional reduced to 10%, Headroom & CAGR boosted.
 WEIGHTS = {
-    # Update 1: Consolidated Market Scale (25%)
-    'Opportunity ($M)': 0.15,
-    'Potential Market Size ($M)': 0.10,
-    
-    # Update 3: Institutional Risk Consolidation (10%)
-    'Ease of Doing Business': 0.03,
-    'Political Stability': 0.03,
-    'Rule of Law': 0.04,
-    
-    # Growth & Strategy (Boosted)
-    'Penetration Headroom': 0.15,
-    'Gym Membership CAGR': 0.10,
-    'Real Estate Cost Index': 0.07,
-    
-    # Secondary Indicators (Kept at current values)
-    'Youth / Working Age Population % (15–64)': 0.05,
-    'Middle Class %': 0.05,
-    'Ease of Financing (GFDD)': 0.05,
-    'Avg Gym Spend as % of GDP': 0.05,
-    'Inflation Rate': 0.03,
-    'Currency Volatility': 0.03,
-    'Corporate Tax Rate': 0.03,
-    'Labour Cost Index': 0.02,
-    'Concentration (000s/gym)': 0.02
+    'market_scale': 0.25,        # Consolidated Opportunity + Potential Size
+    'penetration_headroom': 0.15, 
+    'institutional_risk': 0.10,  # Consolidated Governance + Stability
+    'gym_membership_cagr': 0.10,
+    'operating_cost_composite': 0.15, # Labor (0.6) + Real Estate (0.4)
+    'youth_population_pct': 0.10,
+    'middle_class_pct': 0.10,
+    'fitness_spend_proxy': 0.05
 }
 
-# Values where LOWER is BETTER
-INVERTED_METRICS = [
-    'Corporate Tax Rate', 
-    'Real Estate Cost Index', 
-    'Inflation Rate', 
-    'Currency Volatility',
-    'Labour Cost Index'
+# Metrics where LOWER value = BETTER score
+INVERTED_VARIABLES = [
+    'labor_cost_index', 
+    'real_estate_cost_index', 
+    'inflation_rate', 
+    'currency_volatility',
+    'corporate_tax_rate'
 ]
+
+# Feature Engineering Transforms
+PRE_TRANSFORMS = {
+    "log": ["opportunity_usd_m", "potential_market_size", "concentration"],
+    "sqrt": ["penetration_headroom"]
+}
