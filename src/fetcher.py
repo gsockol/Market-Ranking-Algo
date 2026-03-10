@@ -4,9 +4,12 @@ import logging
 logger = logging.getLogger(__name__)
 
 def fetch_all_external_data(countries, country_iso3_map, wb_indicators, oecd_country_codes=None, te_api_key=None, cache_dir=None, ttl_hours=None, no_cache=False, imf_country_codes=None):
+    """
+    ENGINEERING SPEC SECTION 5: Deterministic Macro Data Retrieval
+    """
     result = {c: {} for c in countries}
     
-    # --- ENGINE 1: WORLD BANK ---
+    # --- ENGINE 1: WORLD BANK (Primary) ---
     for var_key, indicator in wb_indicators.items():
         try:
             url = f"https://api.worldbank.org/v2/country/all/indicator/{indicator}?format=json&per_page=500&date=2021:2024"
@@ -21,14 +24,14 @@ def fetch_all_external_data(countries, country_iso3_map, wb_indicators, oecd_cou
                             if c_iso == iso3 and val is not None and var_key not in result[c_name]:
                                 result[c_name][var_key] = val
         except Exception as e:
-            logger.warning(f"World Bank failed for {var_key}: {e}")
+            logger.warning(f"World Bank fetch failed for {var_key}: {e}")
 
-    # --- ENGINE 2: IMF FALLBACK (For GDP and Tax) ---
-    imf_indicators = {"gdp_growth": "NGDP_RPCH", "inflation": "PCPIPIPCH"}
+    # --- ENGINE 2: IMF FALLBACK (Section 5 - Reliability) ---
+    # Fills in GDP and Inflation if World Bank is down
+    imf_indicators = {"gdp_growth_forecast": "NGDP_RPCH", "inflation_rate": "PCPIPIPCH"}
     for country in countries:
         iso3 = country_iso3_map.get(country)
         for var_key, imf_code in imf_indicators.items():
-            # Only fetch from IMF if World Bank missed it
             if var_key not in result[country] or result[country][var_key] is None:
                 try:
                     imf_url = f"https://www.imf.org/external/datamapper/api/v1/{imf_code}/{iso3}"
@@ -41,12 +44,11 @@ def fetch_all_external_data(countries, country_iso3_map, wb_indicators, oecd_cou
                 except:
                     continue
 
-    # --- ENGINE 3: HARD-CODED DEFAULTS (The "Safety Net") ---
-    # If both APIs fail, use conservative industry averages so the model can still rank
+    # --- ENGINE 3: HARD-CODED DEFAULTS (Section 16 - Failure Mode Protection) ---
     defaults = {"corporate_tax_rate": 25.0, "political_stability": 0.0, "inflation_rate": 3.0}
     for country in countries:
         for key, val in defaults.items():
-            if key not in result[country]:
+            if key not in result[country] or result[country][key] is None:
                 result[country][key] = val
                 
     return result
