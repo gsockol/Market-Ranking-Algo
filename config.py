@@ -19,10 +19,7 @@ WEIGHTS = {
 }
 
 INVERTED_VARIABLES = ["corporate_tax_rate", "concentration", "labor_cost_index", "real_estate_cost_index", "inflation"]
-PRE_TRANSFORMS = {
-    "log": ["opportunity_usd_m", "potential_market_size"],
-    "sqrt": ["headroom"]
-}
+PRE_TRANSFORMS = {"log": ["opportunity_usd_m", "potential_market_size"]}
 
 ISO_MAP = {
     "Austria": "AUT", "Belgium": "BEL", "France": "FRA", "Germany": "DEU",
