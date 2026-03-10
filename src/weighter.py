@@ -53,7 +53,7 @@ def resolve_weights(
     # If operating costs are missing, anchor weight to Corporate Tax Rate
     # ------------------------------------------------------------------
     op_cost_key = "operating_cost_composite"
-    tax_key = "Corporate Tax Rate"
+    tax_key = "corporate_tax_rate"
     
     if not availability.get(op_cost_key, False) and availability.get(tax_key, True):
         proxy_weight = weights.get(op_cost_key, 0.0)
