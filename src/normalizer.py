@@ -4,18 +4,18 @@ import pandas as pd
 def normalize_all(df, weights, inverted_vars, pre_transforms):
     ndf = df.copy()
     
-    # Log Transforms
+    # Apply Log Transforms to compress massive market gaps (Section 7.3)
     for col in pre_transforms.get("log", []):
         if col in ndf.columns:
-            ndf[col] = np.log1p(ndf[col].clip(lower=0))
+            ndf[col] = np.log1p(ndf[col])
 
-    # Rank-based Normalization (0-100)
+    # Rank-based Scoring: 0 to 100 relative to other countries
     for var in weights.keys():
         if var in ndf.columns:
-            # Create a percentile rank (0 to 100)
+            # Rank the countries (Higher Value = Higher Rank)
             ndf[var] = ndf[var].rank(pct=True) * 100
             
-            # Invert costs/risks
+            # Invert if it's a cost or risk (Higher Value = Lower Rank)
             if var in inverted_vars:
                 ndf[var] = 100 - ndf[var]
                 
