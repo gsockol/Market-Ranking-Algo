@@ -1,25 +1,26 @@
+# Synchronized with cleaned CSV headers
 WEIGHTS = {
     "opportunity_usd_m": 0.225,
-    "potential_market_size": 0.125,
+    "potential_market_size_usd_m": 0.125,
     "gym_membership_cagr": 0.05,
-    "headroom": 0.08,
-    "concentration": 0.02,
+    "penetration_headroom": 0.08,
+    "concentration_000sgym": 0.02,
     "ease_of_doing_business": 0.05,
     "political_stability": 0.04,
-    "inflation": 0.03,
+    "inflation_rate": 0.03,
     "currency_volatility": 0.03,
     "rule_of_law": 0.05,
-    "financing_access": 0.05,
+    "ease_of_financing_gfdd": 0.05,
     "corporate_tax_rate": 0.03,
-    "labor_cost_index": 0.02,
+    "labour_cost_index": 0.02,
     "real_estate_cost_index": 0.05,
     "youth_population_pct": 0.05,
     "middle_class_pct": 0.05,
     "fitness_spend_proxy": 0.05
 }
 
-INVERTED_VARIABLES = ["corporate_tax_rate", "concentration", "labor_cost_index", "real_estate_cost_index", "inflation"]
-PRE_TRANSFORMS = {"log": ["opportunity_usd_m", "potential_market_size"]}
+INVERTED_VARIABLES = ["corporate_tax_rate", "concentration_000sgym", "labour_cost_index", "real_estate_cost_index", "inflation_rate"]
+PRE_TRANSFORMS = {"log": ["opportunity_usd_m", "potential_market_size_usd_m"]}
 
 ISO_MAP = {
     "Austria": "AUT", "Belgium": "BEL", "France": "FRA", "Germany": "DEU",
